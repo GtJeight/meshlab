@@ -65,6 +65,9 @@ QString meshlab::defaultPluginPath()
 		dLower == "minsizerel") {
 		// This is a configuration directory for MS Visual Studio.
 		pluginsDir.cdUp();
+		pluginsDir.cd("plugins");
+		pluginsDir.cd(d);
+		return pluginsDir.absolutePath();
 	}
 	else {
 		d.clear();
