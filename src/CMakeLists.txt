@@ -197,6 +197,9 @@ if(NOT DEFINED MESHLAB_PLUGINS) # it may be already defined in parent directory
 		meshlabplugins/edit_referencing
 		meshlabplugins/edit_quality
 		meshlabplugins/edit_select
+
+		# third party plugins
+		thirdpartyplugins/filter_example
 	)
 endif()
 
