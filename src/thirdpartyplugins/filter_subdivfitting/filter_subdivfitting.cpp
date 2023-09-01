@@ -138,11 +138,33 @@ int FilterSubdivFittingPlugin::postCondition(const QAction*) const
  * @param action
  * @param m
  */
-RichParameterList FilterSubdivFittingPlugin::initParameterList(const QAction *action, const MeshModel &m)
+RichParameterList
+FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDocument& md)
 {
 	RichParameterList parlst;
 	switch(ID(action)) {
-	case FP_SUBDIV_FITTING :
+	case FP_SUBDIV_FITTING: {
+		const MeshModel* target = md.mm();
+		// looking for a second mesh different that the current one
+		for (const MeshModel& t : md.meshIterator()) {
+			if (&t != md.mm()) {
+				target = &t;	// control mesh topo
+				break;
+			}
+		}
+		parlst.addParam(RichMesh(
+			"samples",
+			md.mm()->id(),
+			&md,
+			"Samples",
+			"Samples to be fitted"));
+		parlst.addParam(RichMesh(
+			"control_mesh",
+			target->id(),
+			&md,
+			"Control mesh",
+			"Control mesh for subdivision"));
+		}
 		break;
 	default :
 		assert(0);
@@ -167,11 +189,12 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 {
 	switch(ID(action)) {
 	case FP_SUBDIV_FITTING: {
-
 		MeshModel* curMM = md.mm();
 		CMeshO&    m     = curMM->cm;
-		for (size_t iv = 0; iv < m.vn; iv++)
-			log("%d: %f, %f, %f\n", iv, m.vert[iv].P()[0], m.vert[iv].P()[1], m.vert[iv].P()[2]);
+		//for (size_t iv = 0; iv < m.vn; iv++)
+		//	log("%d: %f, %f, %f\n", iv, m.vert[iv].P()[0], m.vert[iv].P()[1], m.vert[iv].P()[2]);
+		for (size_t i = 0; i < m.fn; i++)
+			log("%d: %f, %f, %f\n", i, m.face[i].N()[0], m.face[i].N()[1], m.face[i].N()[2]);
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -179,35 +202,30 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	return std::map<std::string, QVariant>();
 }
 
-//void FilterSubdivFittingPlugin::vertexDisplacement(
-//		MeshDocument &md,
-//		vcg::CallBackPos *cb,
-//		bool updateNormals,
-//		Scalarm max_displacement)
-//{
-//	CMeshO &m = md.mm()->cm;
-//	srand(time(NULL));
-//
-//	for(unsigned int i = 0; i< m.vert.size(); i++){
-//		// Typical usage of the callback for showing a nice progress bar in the bottom.
-//		// First parameter is a 0..100 number indicating percentage of completion, the second is an info string.
-//		cb(100*i/m.vert.size(), "Randomly Displacing...");
-//
-//		Scalarm rndax = (Scalarm(2.0*rand())/RAND_MAX - 1.0 ) *max_displacement;
-//		Scalarm rnday = (Scalarm(2.0*rand())/RAND_MAX - 1.0 ) *max_displacement;
-//		Scalarm rndaz = (Scalarm(2.0*rand())/RAND_MAX - 1.0 ) *max_displacement;
-//		m.vert[i].P() += Point3m(rndax,rnday,rndaz);
-//	}
-//
-//	// Log function dump textual info in the lower part of the MeshLab screen.
-//	log("Successfully displaced %i vertices",m.vn);
-//
-//	// to access to the parameters of the filter dialog simply use the getXXXX function of the FilterParameter Class
-//	if(updateNormals){
-//		vcg::tri::UpdateNormal<CMeshO>::PerVertexNormalizedPerFace(m);
-//	}
-//
-//	vcg::tri::UpdateBounding<CMeshO>::Box(m);
-//}
+void FilterSubdivFittingPlugin::solveFootPoints(
+	MeshDocument&    md,
+	MeshModel&       spl,
+	const MeshModel& ctrlm,
+	int              mode)
+{
+	switch (mode) {
+	case FootPointMode::MODE_MESH: {
+
+	} break;
+	case FootPointMode::MODE_SUBDIVISION: {
+
+	} break;
+	default: break;
+	}
+}
+
+std::pair<CFaceO*, vcg::Point3f>
+FilterSubdivFittingPlugin::distancePointTriangle(const CVertexO& v, const CFaceO& f)
+{
+	auto n  = f.cN();
+	auto p  = v.cP();
+
+	return std::pair<CFaceO*, vcg::Point3f>(0, vcg::Point3f(0, 0, 0));
+}
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSamplePlugin)

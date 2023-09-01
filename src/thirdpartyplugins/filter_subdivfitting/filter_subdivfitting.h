@@ -50,6 +50,7 @@ class FilterSubdivFittingPlugin : public QObject, public FilterPlugin
 public:
 	//enum used to give an ID to every filter implemented in the plugin
 	enum FileterIds {FP_SUBDIV_FITTING};
+	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
 
 	FilterSubdivFittingPlugin();
 
@@ -62,7 +63,7 @@ public:
 	FilterArity filterArity(const QAction*) const;
 	int getPreConditions(const QAction *) const;
 	int postCondition(const QAction* ) const;
-	RichParameterList initParameterList(const QAction*, const MeshModel &/*m*/);
+	RichParameterList initParameterList(const QAction*, const MeshDocument& /*m*/);
 	std::map<std::string, QVariant> applyFilter(
 			const QAction* action,
 			const RichParameterList & params,
@@ -71,11 +72,13 @@ public:
 			vcg::CallBackPos * cb);
 
 private:
-	void vertexDisplacement(
-			MeshDocument &md,
-			vcg::CallBackPos *cb,
-			bool updateNormals,
-			Scalarm max_displacement);
+	void solveFootPoints(MeshDocument& md, MeshModel& spl, const MeshModel& ctrlm, int mode);
+	std::pair<CFaceO*,vcg::Point3f> distancePointTriangle(const CVertexO& v, const CFaceO& f);
+	//void vertexDisplacement(
+	//		MeshDocument &md,
+	//		vcg::CallBackPos *cb,
+	//		bool updateNormals,
+	//		Scalarm max_displacement);
 };
 
 #endif //MESHLAB_FILTER_SUBDIVFITTING_PLUGIN_H
