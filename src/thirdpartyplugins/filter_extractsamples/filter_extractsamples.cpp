@@ -166,8 +166,13 @@ std::map<std::string, QVariant> FilterExtractSamplesPlugin::applyFilter(
 		vcg::CallBackPos *cb)
 {
 	switch(ID(action)) {
-	case FP_PRINT_SAMPLES: log("a test\n");
-		break;
+	case FP_PRINT_SAMPLES: {
+
+		MeshModel* curMM = md.mm();
+		CMeshO&    m     = curMM->cm;
+		for (size_t iv = 0; iv < m.vn; iv++)
+			log("%d: %f, %f, %f\n", iv, m.vert[iv].P()[0], m.vert[iv].P()[1], m.vert[iv].P()[2]);
+	} break;
 	default :
 		wrongActionCalled(action);
 	}
