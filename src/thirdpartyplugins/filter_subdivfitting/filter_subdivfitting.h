@@ -73,7 +73,7 @@ public:
 
 private:
 	void solveFootPoints(MeshDocument& md, MeshModel& spl, const MeshModel& ctrlm, int mode);
-	std::pair<CFaceO*,vcg::Point3f> distancePointTriangle(const CVertexO& v, const CFaceO& f);
+	std::pair<float,vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
 	//void vertexDisplacement(
 	//		MeshDocument &md,
 	//		vcg::CallBackPos *cb,

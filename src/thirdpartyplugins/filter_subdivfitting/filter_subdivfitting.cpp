@@ -23,6 +23,8 @@
 
 #include "filter_subdivfitting.h"
 
+using namespace vcg;
+
 /**
  * @brief
  * Constructor usually performs only two simple tasks of filling the two lists
@@ -191,10 +193,13 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	case FP_SUBDIV_FITTING: {
 		MeshModel* curMM = md.mm();
 		CMeshO&    m     = curMM->cm;
-		//for (size_t iv = 0; iv < m.vn; iv++)
-		//	log("%d: %f, %f, %f\n", iv, m.vert[iv].P()[0], m.vert[iv].P()[1], m.vert[iv].P()[2]);
-		for (size_t i = 0; i < m.fn; i++)
-			log("%d: %f, %f, %f\n", i, m.face[i].N()[0], m.face[i].N()[1], m.face[i].N()[2]);
+		//for (size_t i = 0; i < m.fn; i++)
+		//	log("%d: %f, %f, %f\n", i, m.face[i].N()[0], m.face[i].N()[1], m.face[i].N()[2]);
+		solveFootPoints(
+			md,
+			*md.getMesh(par.getMeshId("samples")),
+			*md.getMesh(par.getMeshId("control_mesh")),
+			FootPointMode::MODE_MESH);
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -208,24 +213,151 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 	const MeshModel& ctrlm,
 	int              mode)
 {
+	CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptrs;
+	if (tri::HasPerVertexAttribute(spl.cm, "FootTriangle")) {
+		ftptrs =
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(spl.cm, "FootTriangle");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<const CFaceO*>(spl.cm, ftptrs)) {
+			throw MLException("attribute already exists with a different type");
+		}
+	}
+	else
+		ftptrs =
+			tri::Allocator<CMeshO>::AddPerVertexAttribute<const CFaceO*>(spl.cm, "FootTriangle");
+
+	for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
+		if (!(*vi).IsD()) {
+			ftptrs[vi] = nullptr;
+		}
+	}
+
+
+	CMeshO::PerVertexAttributeHandle<Point3f> ftbarycoords;
+	if (tri::HasPerVertexAttribute(spl.cm, "BaryCoord")) {
+		ftbarycoords = tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<Point3f>(spl.cm, ftbarycoords)) {
+			throw MLException("attribute already exists with a different type");
+		}
+	}
+	else
+		ftbarycoords = tri::Allocator<CMeshO>::AddPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
+
+	for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
+		if (!(*vi).IsD()) {
+			ftbarycoords[vi] = Point3f(0, 0, 0);
+		}
+	}
+
+
 	switch (mode) {
 	case FootPointMode::MODE_MESH: {
+		// solve foot point by brute force
+		for (auto si = spl.cm.vert.begin(); si != spl.cm.vert.end(); si++) {
+			std::pair<float, vcg::Point3f> minpair(
+				std::numeric_limits<float>::max(), Point3f(0.f, 0.f, 0.f));
+			const CFaceO*                  footface = nullptr;
+			for (auto fi = ctrlm.cm.face.begin(); fi != ctrlm.cm.face.end(); fi++) {
+				auto d = distancePointTriangle(*si, *fi);
+				if (d.first < minpair.first) {
+					minpair = d;
+					footface = &(*fi);
+				}
+			}
 
+			log("%f, %f, %f, %f\n",
+				minpair.first,
+				minpair.second[0],
+				minpair.second[1],
+				minpair.second[2]);
+		}
 	} break;
 	case FootPointMode::MODE_SUBDIVISION: {
-
+		// solve foot point by Newton method, need subdivision surface evaluation
 	} break;
 	default: break;
 	}
+
+	// test code for vertex attribute
+	//auto test1 = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(spl.cm, "FootTriangle");
+	//if (!tri::Allocator<CMeshO>::IsValidHandle<const CFaceO*>(spl.cm, test1)) {
+	//	throw MLException("attribute test failed");
+	//}
+	//for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
+	//	if (!(*vi).IsD()) {
+	//		log("%d\n", test1[vi] == nullptr);
+	//	}
+	//}
+
+	//auto test2 = tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
+	//if (!tri::Allocator<CMeshO>::IsValidHandle<Point3f>(spl.cm, test2)) {
+	//	throw MLException("attribute test failed");
+	//}
+	//for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
+	//	if (!(*vi).IsD()) {
+	//		log("%f, %f, %f\n", test2[vi][0], test2[vi][1], test2[vi][2]);
+	//	}
+	//}
 }
 
-std::pair<CFaceO*, vcg::Point3f>
-FilterSubdivFittingPlugin::distancePointTriangle(const CVertexO& v, const CFaceO& f)
+std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const CVertexO& _p,const CFaceO& _f)
 {
-	auto n  = f.cN();
-	auto p  = v.cP();
+	auto n  = _f.N();
+	auto p  = _p.P();
+	auto v0 = _f.V(0)->P();
+	auto v1 = _f.V(1)->P();
+	auto v2 = _f.V(2)->P();
+	float height  = (p-v0).dot(n);
+	float squared_parallel_dist = 0.f, l0 = 0.f, l1 = 0.f, l2 = 0.f;
+	auto project = p - height * n;
 
-	return std::pair<CFaceO*, vcg::Point3f>(0, vcg::Point3f(0, 0, 0));
+	// case corner
+	if ((project - v0).dot(v0 - v1) > 0.f && (project - v0).dot(v0 - v2) > 0.f)
+		squared_parallel_dist = (project - v0).SquaredNorm();
+	else if ((project - v1).dot(v1 - v2) > 0.f && (project - v1).dot(v1 - v0) > 0.f)
+		squared_parallel_dist = (project - v1).SquaredNorm();
+	else if ((project - v2).dot(v2 - v0) > 0.f && (project - v2).dot(v2 - v1) > 0.f)
+		squared_parallel_dist = (project - v2).SquaredNorm();
+	else {
+		float detf = v0[0] * v1[1] * v2[2] + v0[1] * v1[2] * v2[0] + v0[2] * v1[0] * v2[1] -
+					 v0[2] * v1[1] * v2[0] - v0[1] * v1[0] * v2[2] - v0[0] * v1[2] * v2[1];
+		l0 =
+			(project[0] * v1[1] * v2[2] + project[1] * v1[2] * v2[0] + project[2] * v1[0] * v2[1] -
+			 project[2] * v1[1] * v2[0] - project[1] * v1[0] * v2[2] - project[0] * v1[2] * v2[1]) /
+			detf;
+		l1 =
+			(v0[0] * project[1] * v2[2] + v0[1] * project[2] * v2[0] + v0[2] * project[0] * v2[1] -
+			 v0[2] * project[1] * v2[0] - v0[1] * project[0] * v2[2] - v0[0] * project[2] * v2[1]) /
+			detf;
+		l2 =
+			(v0[0] * v1[1] * project[2] + v0[1] * v1[2] * project[0] + v0[2] * v1[0] * project[1] -
+			 v0[2] * v1[1] * project[0] - v0[1] * v1[0] * project[2] - v0[0] * v1[2] * project[1]) /
+			detf;
+
+		if (l0 < 0.f) {
+			l0 = 0.f;
+			l1 = (project - v2).dot((v1 - v2).normalized()) / (v1 - v2).Norm();
+			l2 = 1.f - l1;
+			squared_parallel_dist = (project - v2).SquaredNorm() - l1 * l1;
+		}
+
+		else if (l1 < 0.f) {
+			l1 = 0.f;
+			l2 = (project - v0).dot((v2 - v0).normalized()) / (v2 - v0).Norm();
+			l0 = 1.f - l2;
+			squared_parallel_dist = (project - v0).SquaredNorm() - l2 * l2;
+		}
+		else if (l2 < 0.f) {
+			l2 = 0.f;
+			l0 = (project - v1).dot((v0 - v1).normalized()) / (v0 - v1).Norm();
+			l1 = 1.f - l0;
+			squared_parallel_dist = (project - v1).SquaredNorm() - l0 * l0;
+		}
+		else
+			squared_parallel_dist = 0.f;
+	}
+
+	return std::pair<float, Point3f>(
+		sqrtf(height * height + squared_parallel_dist), Point3f(l0, l1, l2));
 }
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSamplePlugin)
