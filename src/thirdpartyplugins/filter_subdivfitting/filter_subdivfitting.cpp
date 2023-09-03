@@ -306,32 +306,39 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 	auto v0 = _f.V(0)->P();
 	auto v1 = _f.V(1)->P();
 	auto v2 = _f.V(2)->P();
-	float height  = (p-v0).dot(n);
+	float height                = (p - v0).dot(n);
 	float squared_parallel_dist = 0.f, l0 = 0.f, l1 = 0.f, l2 = 0.f;
-	auto project = p - height * n;
+	auto  project = p - height * n;
+
+	auto det = [](const Point3f& v0, const Point3f& v1, const Point3f& v2) -> float {
+		return v0[0] * v1[1] * v2[2] + v0[1] * v1[2] * v2[0] + v0[2] * v1[0] * v2[1] -
+			   v0[2] * v1[1] * v2[0] - v0[1] * v1[0] * v2[2] - v0[0] * v1[2] * v2[1];
+	};
 
 	// case corner
-	if ((project - v0).dot(v0 - v1) > 0.f && (project - v0).dot(v0 - v2) > 0.f)
+	if ((project - v0).dot(v0 - v1) > 0.f && (project - v0).dot(v0 - v2) > 0.f) {
 		squared_parallel_dist = (project - v0).SquaredNorm();
-	else if ((project - v1).dot(v1 - v2) > 0.f && (project - v1).dot(v1 - v0) > 0.f)
+		l0                    = 1.f;
+		l1                    = 0.f;
+		l2                    = 0.f;
+	}
+	else if ((project - v1).dot(v1 - v2) > 0.f && (project - v1).dot(v1 - v0) > 0.f) {
 		squared_parallel_dist = (project - v1).SquaredNorm();
-	else if ((project - v2).dot(v2 - v0) > 0.f && (project - v2).dot(v2 - v1) > 0.f)
+		l0                    = 0.f;
+		l1                    = 1.f;
+		l2                    = 0.f;
+	}
+	else if ((project - v2).dot(v2 - v0) > 0.f && (project - v2).dot(v2 - v1) > 0.f) {
 		squared_parallel_dist = (project - v2).SquaredNorm();
+		l0                    = 0.f;
+		l1                    = 0.f;
+		l2                    = 1.f;
+	}
 	else {
-		float detf = v0[0] * v1[1] * v2[2] + v0[1] * v1[2] * v2[0] + v0[2] * v1[0] * v2[1] -
-					 v0[2] * v1[1] * v2[0] - v0[1] * v1[0] * v2[2] - v0[0] * v1[2] * v2[1];
-		l0 =
-			(project[0] * v1[1] * v2[2] + project[1] * v1[2] * v2[0] + project[2] * v1[0] * v2[1] -
-			 project[2] * v1[1] * v2[0] - project[1] * v1[0] * v2[2] - project[0] * v1[2] * v2[1]) /
-			detf;
-		l1 =
-			(v0[0] * project[1] * v2[2] + v0[1] * project[2] * v2[0] + v0[2] * project[0] * v2[1] -
-			 v0[2] * project[1] * v2[0] - v0[1] * project[0] * v2[2] - v0[0] * project[2] * v2[1]) /
-			detf;
-		l2 =
-			(v0[0] * v1[1] * project[2] + v0[1] * v1[2] * project[0] + v0[2] * v1[0] * project[1] -
-			 v0[2] * v1[1] * project[0] - v0[1] * v1[0] * project[2] - v0[0] * v1[2] * project[1]) /
-			detf;
+		float detf = det(n, v0-v1,v1-v2);
+		l0         = det(n, project - v1, v1 - v2) / detf;
+		l1         = det(n, v0 - project, project - v2) / detf;
+		l2         = det(n, v0 - v1, v1 - project) / detf;
 
 		if (l0 < 0.f) {
 			l0 = 0.f;
@@ -339,7 +346,6 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 			l2 = 1.f - l1;
 			squared_parallel_dist = (project - v2).SquaredNorm() - l1 * l1;
 		}
-
 		else if (l1 < 0.f) {
 			l1 = 0.f;
 			l2 = (project - v0).dot((v2 - v0).normalized()) / (v2 - v0).Norm();
@@ -360,4 +366,4 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 		sqrtf(height * height + squared_parallel_dist), Point3f(l0, l1, l2));
 }
 
-MESHLAB_PLUGIN_NAME_EXPORTER(FilterSamplePlugin)
+MESHLAB_PLUGIN_NAME_EXPORTER(FilterSubdivFittingPlugin)
