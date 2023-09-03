@@ -74,11 +74,11 @@ public:
 private:
 	void solveFootPoints(MeshDocument& md, MeshModel& spl, const MeshModel& ctrlm, int mode);
 	std::pair<float,vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
-	//void vertexDisplacement(
-	//		MeshDocument &md,
-	//		vcg::CallBackPos *cb,
-	//		bool updateNormals,
-	//		Scalarm max_displacement);
+	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
+	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
+	Eigen::VectorXd               weightsIrregularPatch(int V, float v, float w);
+	Eigen::VectorXd               weightsRegularPatch(float u, float v, float w);
+	float                         eps = 1.f / 64.f;
 };
 
 #endif //MESHLAB_FILTER_SUBDIVFITTING_PLUGIN_H

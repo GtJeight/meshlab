@@ -200,6 +200,13 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			*md.getMesh(par.getMeshId("samples")),
 			*md.getMesh(par.getMeshId("control_mesh")),
 			FootPointMode::MODE_MESH);
+
+		{
+			//test code
+			Eigen::VectorXd a(3);
+			a << 1, 2, 3;
+			log("%f%f%f", a[0], a[1], a[2]);
+		}
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -364,6 +371,89 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 
 	return std::pair<float, Point3f>(
 		sqrtf(height * height + squared_parallel_dist), Point3f(l0, l1, l2));
+}
+
+Point3f
+FilterSubdivFittingPlugin::evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord)
+{
+	return Point3f(0.f, 0.f, 0.f);
+}
+
+Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float v, float w)
+{
+	//Eigen::VectorXf b(N + 6);
+	//if (N == 6) {
+	//	
+	//}
+
+
+	return Eigen::VectorXd::Zero(1);
+}
+
+Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int V, float v, float w)
+{
+	if (v + w < eps) {
+	}
+	else {
+		int k    = -1;
+		int n    = 1 - log2f(v + w);
+		int pow2 = powf(2.f, n - 1);
+		v *= pow2;
+		w *= pow2;
+
+		// barycoord transform to regular patch Omega_n,k
+		if (v > 0.5f) {
+			k = 0;
+			v = 2 * v - 1;
+			w = 2 * w;
+		}
+		else if (w > 0.5f) {
+			k = 2;
+			v = 2 * v;
+			w = 2 * w - 1;
+		}
+		else {
+			k = 1;
+			v = 1 - 2 * v;
+			w = 1 - 2 * w;
+		}
+		float u = 1.f - v - w;
+
+
+
+	}
+	
+
+	return Eigen::VectorXd::Zero(1);
+}
+
+Eigen::VectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float v, float w)
+{
+	Eigen::VectorXd b(11);
+	b << pow(u, 4) + 2 * pow(u, 3) * v, pow(u, 4) + 2 * pow(u, 3) * w,
+		pow(u, 4) + 2 * pow(u, 3) * w + 6 * pow(u, 3) * v + 6 * u * u * v * w + 12 * u * u * v * v +
+			6 * u * v * v * w + 6 * u * pow(v, 3) + 2 * pow(v, 3) * w + pow(v, 4),
+		6 * pow(u, 4) + 24 * pow(u, 3) * w + 24 * u * u * w * w + 8 * u * pow(w, 3) + pow(w, 4) +
+			24 * pow(u, 3) * v + 60 * u * u * v * w + 36 * u * v * w * w + 6 * v * pow(w, 3) +
+			24 * u * u * v * v + 36 * u * v * v * w + 12 * v * v * w * w + 8 * u * pow(v, 3) +
+			6 * pow(v, 3) * w + pow(v, 4),
+		pow(u, 4) + 6 * pow(u, 3) * w + 12 * u * u * w * w + 6 * u * pow(w, 3) + pow(w, 4) +
+			2 * pow(u, 3) * v + 6 * u * u * v * w + 6 * u * v * w * w + 2 * v * pow(w, 3),
+		2 * u * pow(v, 3) + pow(v, 4),
+		pow(u, 4) + 6 * pow(u, 3) * w + 12 * u * u * w * w + 6 * u * pow(w, 3) + pow(w, 4) +
+			8 * pow(u, 3) * v + 36 * u * u * v * w + 36 * u * v * w * w + 8 * v * pow(w, 3) +
+			24 * u * u * v * v + 60 * u * v * v * w + 24 * v * v * w * w + 24 * u * pow(v, 3) +
+			24 * pow(v, 3) * w + 6 * pow(v, 4),
+		pow(u, 4) + 8 * pow(u, 3) * w + 24 * u * u * w * w + 24 * u * pow(w, 3) + 6 * pow(w, 4) +
+			6 * pow(u, 3) * v + 36 * u * u * v * w + 60 * u * v * w * w + 24 * v * pow(w, 3) +
+			12 * u * u * v * v + 36 * u * v * v * w + 24 * v * v * w * w + 6 * u * pow(v, 3) +
+			8 * pow(v, 3) * w + pow(v, 4),
+		2 * u * pow(w, 3) + pow(w, 4), 2 * pow(v, 3) * w + pow(v, 4),
+		2 * u * pow(w, 3) + pow(w, 4) + 6 * u * v * w * w + 6 * v * pow(w, 3) + 6 * u * v * v * w +
+			12 * v * v * w * w + 2 * u * pow(v, 3) + 6 * pow(v, 3) * w + pow(v, 4),
+		pow(w, 4) + 2 * v * pow(w, 3);
+		;
+	return b;
 }
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSubdivFittingPlugin)
