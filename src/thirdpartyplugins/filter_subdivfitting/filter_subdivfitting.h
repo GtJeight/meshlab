@@ -77,7 +77,8 @@ private:
 	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
 	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
 	Eigen::VectorXd               weightsIrregularPatch(int V, float v, float w);
-	Eigen::VectorXd               weightsRegularPatch(float u, float v, float w);
+	Eigen::RowVectorXd            weightsRegularPatch(float u, float v, float w);
+	Eigen::MatrixXi               matrixPickUP(int N, int k);
 	float                         eps = 1.f / 64.f;
 };
 

@@ -200,13 +200,6 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			*md.getMesh(par.getMeshId("samples")),
 			*md.getMesh(par.getMeshId("control_mesh")),
 			FootPointMode::MODE_MESH);
-
-		{
-			//test code
-			Eigen::VectorXd a(3);
-			a << 1, 2, 3;
-			log("%f%f%f", a[0], a[1], a[2]);
-		}
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -392,6 +385,9 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float 
 
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int V, float v, float w)
 {
+	if (V == 6)
+		return weightsRegularPatch(1.f - v - w, v, w);
+
 	if (v + w < eps) {
 	}
 	else {
@@ -427,9 +423,9 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int V, float v,
 	return Eigen::VectorXd::Zero(1);
 }
 
-Eigen::VectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float v, float w)
+Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float v, float w)
 {
-	Eigen::VectorXd b(11);
+	Eigen::RowVectorXd b(11);
 	b << pow(u, 4) + 2 * pow(u, 3) * v, pow(u, 4) + 2 * pow(u, 3) * w,
 		pow(u, 4) + 2 * pow(u, 3) * w + 6 * pow(u, 3) * v + 6 * u * u * v * w + 12 * u * u * v * v +
 			6 * u * v * v * w + 6 * u * pow(v, 3) + 2 * pow(v, 3) * w + pow(v, 4),
@@ -452,8 +448,19 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float v,
 		2 * u * pow(w, 3) + pow(w, 4) + 6 * u * v * w * w + 6 * v * pow(w, 3) + 6 * u * v * v * w +
 			12 * v * v * w * w + 2 * u * pow(v, 3) + 6 * pow(v, 3) * w + pow(v, 4),
 		pow(w, 4) + 2 * v * pow(w, 3);
-		;
 	return b;
+}
+
+Eigen::MatrixXi FilterSubdivFittingPlugin::matrixPickUP(int N, int k)
+{
+	Eigen::MatrixXi P = Eigen::MatrixXi::Zero(12,N+12);
+	switch (k) {
+	case 1: {
+		std::vector<int> id {
+			3, 1, N + 4, 2, N + 1, N + 9, N + 3, N + 2, N + 5, N + 8, N + 7, N + 10};
+	}
+	default: break;
+	}
 }
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSubdivFittingPlugin)
