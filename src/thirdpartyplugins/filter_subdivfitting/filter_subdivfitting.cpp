@@ -199,7 +199,14 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			md,
 			*md.getMesh(par.getMeshId("samples")),
 			*md.getMesh(par.getMeshId("control_mesh")),
-			FootPointMode::MODE_MESH);
+			FootPointMode::MODE_SUBDIVISION);
+
+		{
+			//Eigen::MatrixXi P = matrixPickUP(7, 1);
+			//std::cout << P;
+			//int i = -1, N = 3;
+			//std::cout << ((i % N)+N)%N;
+		}
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -263,16 +270,29 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 					footface = &(*fi);
 				}
 			}
-
-			log("%f, %f, %f, %f\n",
-				minpair.first,
-				minpair.second[0],
-				minpair.second[1],
-				minpair.second[2]);
 		}
 	} break;
 	case FootPointMode::MODE_SUBDIVISION: {
 		// solve foot point by Newton method, need subdivision surface evaluation
+		for (auto si = spl.cm.vert.begin(); si != spl.cm.vert.end(); si++) {
+			std::pair<float, vcg::Point3f> minpair(
+				std::numeric_limits<float>::max(), Point3f(0.f, 0.f, 0.f));
+			const CFaceO* footface = nullptr;
+			for (auto fi = ctrlm.cm.face.begin(); fi != ctrlm.cm.face.end(); fi++) {
+				auto d = distancePointTriangle(*si, *fi);
+				if (d.first < minpair.first) {
+					minpair  = d;
+					footface = &(*fi);
+				}
+			}
+
+			ftptrs[si] = footface;
+			ftbarycoords[si] = minpair.second;
+		}
+
+		for (auto si = spl.cm.vert.begin(); si != spl.cm.vert.end(); si++) {
+			auto p = evaluateLimitPoint(ftptrs[si], ftbarycoords[si]);
+		}
 	} break;
 	default: break;
 	}
@@ -369,6 +389,7 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 Point3f
 FilterSubdivFittingPlugin::evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord)
 {
+	auto b = weightsPatch(ft, barycoord[1], barycoord[2]);
 	return Point3f(0.f, 0.f, 0.f);
 }
 
@@ -379,13 +400,15 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float 
 	//	
 	//}
 
+	auto b = weightsIrregularPatch(7, v, w);
+
 
 	return Eigen::VectorXd::Zero(1);
 }
 
-Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int V, float v, float w)
+Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v, float w)
 {
-	if (V == 6)
+	if (N == 6)
 		return weightsRegularPatch(1.f - v - w, v, w);
 
 	if (v + w < eps) {
@@ -415,7 +438,12 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int V, float v,
 		}
 		float u = 1.f - v - w;
 
-
+		Eigen::RowVectorXd b  = weightsRegularPatch(u, v, w);
+		std::cout << "111111111111111" << std::endl;
+		Eigen::MatrixXi    P  = matrixPickUP(N, k);
+		std::cout << "222222222222222" << std::endl;
+		Eigen::MatrixXd    A_ = matrixPatchSubdiv(N);
+		std::cout << "333333333333333" << std::endl;
 
 	}
 	
@@ -425,7 +453,7 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int V, float v,
 
 Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float v, float w)
 {
-	Eigen::RowVectorXd b(11);
+	Eigen::RowVectorXd b(12);
 	b << pow(u, 4) + 2 * pow(u, 3) * v, pow(u, 4) + 2 * pow(u, 3) * w,
 		pow(u, 4) + 2 * pow(u, 3) * w + 6 * pow(u, 3) * v + 6 * u * u * v * w + 12 * u * u * v * v +
 			6 * u * v * v * w + 6 * u * pow(v, 3) + 2 * pow(v, 3) * w + pow(v, 4),
@@ -455,12 +483,59 @@ Eigen::MatrixXi FilterSubdivFittingPlugin::matrixPickUP(int N, int k)
 {
 	Eigen::MatrixXi P = Eigen::MatrixXi::Zero(12,N+12);
 	switch (k) {
+
+	case 0: {
+		std::vector<int> idx {2, 0, N + 3, 1, N, N + 8, N + 2, N + 1, N + 4, N + 7, N + 6, N + 9};
+		P(Eigen::placeholders::all, idx) = Eigen::MatrixXi::Identity(12, 12);
+	} break;
+
 	case 1: {
-		std::vector<int> id {
-			3, 1, N + 4, 2, N + 1, N + 9, N + 3, N + 2, N + 5, N + 8, N + 7, N + 10};
-	}
+		std::vector<int> idx {N + 9, N + 6, N + 4, N + 1, N + 2, N + 5, N, 1, N + 3, N - 1, 0, 2};
+		P(Eigen::placeholders::all, idx) = Eigen::MatrixXi::Identity(12, 12);
+	} break;
+
+	case 2: {
+		std::vector<int> idx {
+			0, N - 1, 1, N, N + 5, N + 2, N + 1, N + 4, N + 11, N + 6, N + 9, N + 10};
+		P(Eigen::placeholders::all, idx) = Eigen::MatrixXi::Identity(12, 12);
+	} break;
+
 	default: break;
 	}
+	return P;
+}
+
+static int id(int i, int N)
+{
+	return ((i % N) + N) % N;
+}
+
+Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N)
+{
+	double          alphaN = 5 / 8 - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64;
+	double          aN     = 1. - alphaN;
+	double          bN     = alphaN / N;
+	double          c      = 0.375;
+	double          d      = 0.125;
+	Eigen::MatrixXd A_ = Eigen::MatrixXd::Zero(N + 12, N + 6);
+
+	// constructing S
+	// 1-ring neighbor of EV
+	A_(0, 0) = aN;
+	A_(0,Eigen::seq(1,N)).array() = bN;
+	Eigen::RowVector4d cd(c, c, d, d);
+	for (int i = 1; i < N + 1; i++) {
+		A_(i, {0, i, id(i - 1, N + 1), id(i + 1, N + 1)}) = cd;
+	}
+
+	// constructing S_11 and S_12
+	// edge vertices
+	A_(N + 1, {1, N, 0, N + 1}) = cd;
+	A_(N + 3, {1, 2, 0, N + 3}) = cd;
+	//A_(N)
+
+
+	return A_;
 }
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSubdivFittingPlugin)
