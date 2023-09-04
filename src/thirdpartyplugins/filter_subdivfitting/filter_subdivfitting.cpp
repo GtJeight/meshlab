@@ -438,12 +438,14 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v,
 		}
 		float u = 1.f - v - w;
 
-		Eigen::RowVectorXd b  = weightsRegularPatch(u, v, w);
-		std::cout << "111111111111111" << std::endl;
-		Eigen::MatrixXi    P  = matrixPickUP(N, k);
-		std::cout << "222222222222222" << std::endl;
-		Eigen::MatrixXd    A_ = matrixPatchSubdiv(N);
-		std::cout << "333333333333333" << std::endl;
+		auto B = weightsRegularPatch(u, v, w) * matrixPickUP(N, k) * matrixPatchSubdiv(N);
+
+		//Eigen::RowVectorXd b  = weightsRegularPatch(u, v, w);
+		//std::cout << "111111111111111" << std::endl;
+		//Eigen::MatrixXi    P  = matrixPickUP(N, k);
+		//std::cout << "222222222222222" << std::endl;
+		//Eigen::MatrixXd    A_ = matrixPatchSubdiv(N);
+		//std::cout << "333333333333333" << std::endl;
 
 	}
 	
@@ -479,25 +481,25 @@ Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float
 	return b;
 }
 
-Eigen::MatrixXi FilterSubdivFittingPlugin::matrixPickUP(int N, int k)
+Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickUP(int N, int k)
 {
-	Eigen::MatrixXi P = Eigen::MatrixXi::Zero(12,N+12);
+	Eigen::MatrixXd P = Eigen::MatrixXd::Zero(12, N + 12);
 	switch (k) {
 
 	case 0: {
 		std::vector<int> idx {2, 0, N + 3, 1, N, N + 8, N + 2, N + 1, N + 4, N + 7, N + 6, N + 9};
-		P(Eigen::placeholders::all, idx) = Eigen::MatrixXi::Identity(12, 12);
+		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
 	} break;
 
 	case 1: {
 		std::vector<int> idx {N + 9, N + 6, N + 4, N + 1, N + 2, N + 5, N, 1, N + 3, N - 1, 0, 2};
-		P(Eigen::placeholders::all, idx) = Eigen::MatrixXi::Identity(12, 12);
+		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
 	} break;
 
 	case 2: {
 		std::vector<int> idx {
 			0, N - 1, 1, N, N + 5, N + 2, N + 1, N + 4, N + 11, N + 6, N + 9, N + 10};
-		P(Eigen::placeholders::all, idx) = Eigen::MatrixXi::Identity(12, 12);
+		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
 	} break;
 
 	default: break;
@@ -532,9 +534,19 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N)
 	// edge vertices
 	A_(N + 1, {1, N, 0, N + 1}) = cd;
 	A_(N + 3, {1, 2, 0, N + 3}) = cd;
-	//A_(N)
-
-
+	A_(N + 5, {N - 1, N, 0, N + 5}) = cd;
+	A_(N + 6, {1, N + 1, N, N + 2}) = cd;
+	A_(N + 7, {1, N + 2, N + 1, N + 3}) = cd;
+	A_(N + 8, {1, N + 3, 2, N + 2})     = cd;
+	A_(N + 9, {N, N + 1, 1, N + 4})     = cd;
+	A_(N + 10, {N, N + 4, N + 1, N + 5}) = cd;
+	A_(N + 11, {N, N + 5, N - 1, N + 4}) = cd;
+	// vertex vertices
+	A_(N + 2, {1, 0, 2, N + 3, N + 2, N + 1, N}) =
+		(Eigen::RowVectorXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
+	A_(N + 4, {N, 0, 1, N + 1, N + 4, N + 5, N - 1}) =
+		(Eigen::RowVectorXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
+	
 	return A_;
 }
 
