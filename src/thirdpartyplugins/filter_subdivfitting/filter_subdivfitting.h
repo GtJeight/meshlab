@@ -72,6 +72,7 @@ public:
 			vcg::CallBackPos * cb);
 
 private:
+	// Implement following https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/loop.pdf
 	void solveFootPoints(MeshDocument& md, MeshModel& spl, const MeshModel& ctrlm, int mode);
 	std::pair<float,vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
 	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
@@ -79,7 +80,9 @@ private:
 	Eigen::VectorXd               weightsIrregularPatch(int V, float v, float w);
 	Eigen::RowVectorXd            weightsRegularPatch(float u, float v, float w);
 	Eigen::MatrixXd               matrixPickUP(int N, int k);
-	Eigen::MatrixXd               matrixPatchSubdiv(int N);
+	Eigen::MatrixXd               matrixPatchSubdiv(int N, int n);
+	Eigen::MatrixXd               matrixSubdivEigen(int N, int n);
+	Eigen::MatrixXd               matrixSubdivEigenVector(int N);
 	float                         eps = 1.f / 64.f;
 };
 
