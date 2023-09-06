@@ -207,7 +207,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			//int i = -1, N = 3;
 			//std::cout << ((i % N)+N)%N;
 
-			auto test = matrixPatchSubdiv(3, 2, true);
+			auto test = matrixPatchSubdiv(8, 2, true);
 		}
 	} break;
 	default :
@@ -530,7 +530,7 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool 
 	A_(0,Eigen::seq(1,N)).array() = bN;
 	Eigen::RowVector4d cd(c, c, d, d);
 	for (int i = 1; i < N + 1; i++) {
-		A_(i, {0, i, id(i - 1, N + 1), id(i + 1, N + 1)}) = cd;
+		A_(i, {0, i, 1 + id(i - 2, N), 1 + id(i, N)}) = cd;
 	}
 
 	// constructing S_11,S_12,S_21 and S_22
@@ -573,38 +573,33 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool 
 			-16. / 165., 0, 16. / 165., 16. / 165., -16. / 165., 16. / 165., -16. / 165., 0, 0, 1. / 55.,
 			-1. / 165., -1. / 165., -1. / 165., 0, 0, 0, 0, 0;
 
-		if (test) {
-			std::cout << A_(Eigen::seq(0, N + 5), Eigen::placeholders::all) << std::endl;
-			std::cout << V * LambdaPow * V_inv << std::endl;
-			std::cout << V * V_inv << std::endl;
-		}
-
 		return A_ * V * LambdaPow * V_inv;
 	}
 	else {
-		auto f = [&N](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
+		auto f = [&](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
+		auto pairedEig = [&](int k) -> double {
+			return (k == 0) ? 1 : (k == 1 ? (0.625 - alphaN) : f(k / 2));
+		};
 
 		// constructing Sigma and U0
 		LambdaPow(0, 0)  = 1;
 		LambdaPow(1, 1)  = pow(0.625 - alphaN, n - 1);
 		int  halfN       = (N % 2 == 1) ? ((N + 3) / 2) : (N / 2 + 1);
 		int  eigid      = 2;
-		auto idseq       = Eigen::ArrayXd(N);
-		for (int i = 0; i < N; i++)
-			idseq(i) = i;
+		auto idseq       = Eigen::ArrayXd::LinSpaced(N, 0, N - 1);
 		for (int i = 3; i <= halfN; i++) {
 			LambdaPow(eigid, eigid)         = pow(f(i - 2), n - 1);
 			LambdaPow(eigid + 1, eigid + 1) = pow(f(i - 2), n - 1);
-			V(Eigen::seq(1, N), eigid).array()     = (2 * M_PI * (i - 2) / N * idseq).cos();
-			V(Eigen::seq(1, N), eigid + 1).array() = (2 * M_PI * (i - 2) / N * idseq).sin();
+			V(Eigen::seq(1, N), eigid).array()     = (2 * M_PI * (i - 2.) / N * idseq).cos();
+			V(Eigen::seq(1, N), eigid + 1).array() = (2 * M_PI * (i - 2.) / N * idseq).sin();
 			eigid += 2;
 		}
 		if (eigid == N) {
-			LambdaPow(eigid + 1, eigid + 1)    = pow(0.125, n - 1);
-			V(Eigen::seq(1, N), eigid + 1).array() = (2 * M_PI * (halfN - 1) / N * idseq).cos();
+			LambdaPow(eigid, eigid)    = pow(0.125, n - 1);
+			V(Eigen::seq(1, N), eigid).array() = (2 * M_PI * (halfN - 1.) / N * idseq).cos();
 		}
 		V(Eigen::placeholders::all, {0, 1}).array() = 1;
-		V(0,1) = -8/3*alphaN;
+		V(0,1) = -8./3.*alphaN;
 
 		// constructing U1
 		auto S_11U0 =
@@ -613,13 +608,19 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool 
 		if (N % 2 == 1) {
 			for (int col = 0; col < N + 1; col++) {
 				V(Eigen::seq(N + 1, N + 5), col) =
-					S_12.colPivHouseholderQr().solve(S_11U0(Eigen::placeholders::all, col));
+					(pairedEig(col) * Eigen::MatrixXd::Identity(5, 5) - S_12)
+						.colPivHouseholderQr()
+						.solve(S_11U0(Eigen::placeholders::all, col));
+				std::cout << pairedEig(col) << std::endl;
 			}
 		}
 		else {
 			for (int col = 0; col < N; col++) {
 				V(Eigen::seq(N + 1, N + 5), col) =
-					S_12.colPivHouseholderQr().solve(S_11U0(Eigen::placeholders::all, col));
+					(pairedEig(col)*Eigen::MatrixXd::Identity(5,5) - S_12)
+						.colPivHouseholderQr()
+						.solve(S_11U0(Eigen::placeholders::all, col));
+				std::cout << pairedEig(col) << std::endl;
 			}
 			V(Eigen::seq(N + 1, N + 5), N) << 0, 8, 0, -8, 0;
 		}
@@ -634,16 +635,15 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool 
 														  pow(0.125, n - 1),
 														  pow(0.125, n - 1),
 														  pow(0.0625, n - 1),
-														  pow(0.0525, n - 1))
+														  pow(0.0625, n - 1))
 															 .finished();
 
-		// constructing V_inv
-	}
-
-
-	if (test) {
-		std::cout << "A:\n" << A_(Eigen::seq(0, N + 5), Eigen::placeholders::all) << std::endl;
-		std::cout << "VLV:\n" << V * LambdaPow * V.inverse() << std::endl;
+		if (test) {
+			std::cout << halfN << std::endl;
+			std::cout << "A:\n" << A_(Eigen::seq(0, N + 5), Eigen::placeholders::all) << std::endl;
+			std::cout << "V:\n" << V << std::endl;
+			std::cout << "VLV:\n" << V * LambdaPow * V.inverse() << std::endl;
+		}
 	}
 
 	return A_*V*LambdaPow*V.inverse();
