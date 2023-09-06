@@ -80,9 +80,9 @@ private:
 	Eigen::VectorXd               weightsIrregularPatch(int V, float v, float w);
 	Eigen::RowVectorXd            weightsRegularPatch(float u, float v, float w);
 	Eigen::MatrixXd               matrixPickUP(int N, int k);
-	Eigen::MatrixXd               matrixPatchSubdiv(int N, int n);
-	Eigen::MatrixXd               matrixSubdivEigen(int N, int n);
-	Eigen::MatrixXd               matrixSubdivEigenVector(int N);
+	Eigen::MatrixXd               matrixPatchSubdiv(int N, int n, bool test = false);
+	//Eigen::MatrixXd               matrixSubdivEigen(int N, int n);
+	//Eigen::MatrixXd               matrixSubdivEigenVector(int N);
 	float                         eps = 1.f / 64.f;
 };
 

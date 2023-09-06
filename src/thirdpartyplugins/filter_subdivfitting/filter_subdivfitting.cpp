@@ -206,6 +206,8 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			//std::cout << P;
 			//int i = -1, N = 3;
 			//std::cout << ((i % N)+N)%N;
+
+			auto test = matrixPatchSubdiv(3, 2, true);
 		}
 	} break;
 	default :
@@ -512,9 +514,10 @@ static int id(int i, int N)
 	return ((i % N) + N) % N;
 }
 
-Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n)
+Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool test)
 {
-	double          alphaN = 5 / 8 - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64;
+	assert(N >= 3 && n >= 1);
+	double          alphaN = 5. / 8. - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64.;
 	double          aN     = 1. - alphaN;
 	double          bN     = alphaN / N;
 	double          c      = 0.375;
@@ -547,11 +550,36 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n)
 	A_(N + 4, {N, 0, 1, N + 1, N + 4, N + 5, N - 1}) =
 		(Eigen::ArrayXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
 
-	// constructing eigen structure of A
+	if (n == 1)
+		return A_;
+
+	// constructing eigen structure of A and submatrix S
 	Eigen::MatrixXd LambdaPow = Eigen::MatrixXd::Zero(N + 6, N + 6);
 	Eigen::MatrixXd V = Eigen::MatrixXd::Zero(N + 6, N + 6);
 
 	if (N == 3) {
+		LambdaPow.diagonal() << 1, pow(0.25, n - 1), pow(0.25, n - 1), pow(0.125, n - 1),
+			pow(0.125, n - 1), pow(0.125, n - 1), pow(0.0625, n - 1), pow(0.0625, n - 1),
+			pow(0.0625, n - 1);
+		LambdaPow(N + 4, N + 5) = (n - 1) / pow(16., n - 2);
+		V << 1, 0, 0, 0, 0, 0, 0, 0, 33, 1, 0, 1, 0, 0, 0, 0, 0, -22, 1, -1, -1, 0, 0, 0, 0, 0, -22,
+			1, 1, 0, 0, 0, 0, 0, 0, -22, 1, 3, 3, 1, -1, 0, 0, 0, 198, 1, 0, 4, 1, 0, 0, 0,
+			165. / 16., 473, 1, -3, 0, 0, 1, 0, 0, 0, 198, 1, 4, 0, 0, 0, 1, 1, 165. / 16., 438, 1, 0,
+			-3, - 1, 1, 1, 0, 0, 198;
+		Eigen::MatrixXd V_inv = Eigen::MatrixXd::Zero(N + 6, N + 6);
+		V_inv << 0.4, 0.2, 0.2, 0.2, 0, 0, 0, 0, 0, 0, -1. / 3., -1. / 3., 2. / 3., 0, 0, 0, 0, 0, 0,
+			2. / 3., -1. / 3., -1. / 3., 0, 0, 0, 0, 0, -8, 0, 3, 3, 1, 0, 1, 0, 0, -4, 0, 0, 3, 0, 0, 1,
+			0, 0, -8, 3, 3, 0, 1, 0, 0, 0, 1, 7. / 11., 26. / 33., -7. / 33., -40. / 33., 0, -1, 1, 1, -1,
+			-16. / 165., 0, 16. / 165., 16. / 165., -16. / 165., 16. / 165., -16. / 165., 0, 0, 1. / 55.,
+			-1. / 165., -1. / 165., -1. / 165., 0, 0, 0, 0, 0;
+
+		if (test) {
+			std::cout << A_(Eigen::seq(0, N + 5), Eigen::placeholders::all) << std::endl;
+			std::cout << V * LambdaPow * V_inv << std::endl;
+			std::cout << V * V_inv << std::endl;
+		}
+
+		return A_ * V * LambdaPow * V_inv;
 	}
 	else {
 		auto f = [&N](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
@@ -612,52 +640,58 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n)
 		// constructing V_inv
 	}
 
+
+	if (test) {
+		std::cout << "A:\n" << A_(Eigen::seq(0, N + 5), Eigen::placeholders::all) << std::endl;
+		std::cout << "VLV:\n" << V * LambdaPow * V.inverse() << std::endl;
+	}
+
 	return A_*V*LambdaPow*V.inverse();
 }
-
-Eigen::MatrixXd FilterSubdivFittingPlugin::matrixSubdivEigen(int N,int n)
-{
-	Eigen::MatrixXd LambdaPow = Eigen::MatrixXd::Zero(N + 6, N + 6);
-	if (N == 3) {
-
-	}
-	else {
-		double alphaN = 5 / 8 - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64;
-		double aN     = 1. - alphaN;
-		double bN     = alphaN / N;
-		double c      = 0.375;
-		double d      = 0.125;
-
-		auto f = [&N](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
-
-		// constructing Sigma
-		LambdaPow(0, 0) = 1;
-		LambdaPow(1, 1) = pow(0.625 - alphaN, n);
-		int halfN       = (N % 2 == 1) ? ((N - 1) / 2) : (N / 2 - 1);
-		int eigid     = 2;
-		for (int i = 3; i <=halfN ; i++) {
-			LambdaPow(eigid, eigid)             = pow(f(i - 2), n);
-			LambdaPow(eigid + 1, eigid + 1) = pow(f(i - 2), n);
-			eigid += 2;
-		}
-		if (eigid == N)
-			LambdaPow(eigid, eigid) = pow(0.125, n);
-
-		// constructing Delta
-		LambdaPow.bottomRightCorner<5, 5>().diagonal() = (Eigen::ArrayXd(5) << pow(0.125, n),
-														  pow(0.125, n),
-														  pow(0.125, n),
-														  pow(0.0625, n),
-														  pow(0.0525, n))
-															 .finished();
-	}
-
-	return LambdaPow;
-}
-
-Eigen::MatrixXd FilterSubdivFittingPlugin::matrixSubdivEigenVector(int N)
-{
-	return Eigen::MatrixXd(0,0);
-}
+//
+//Eigen::MatrixXd FilterSubdivFittingPlugin::matrixSubdivEigen(int N,int n)
+//{
+//	Eigen::MatrixXd LambdaPow = Eigen::MatrixXd::Zero(N + 6, N + 6);
+//	if (N == 3) {
+//
+//	}
+//	else {
+//		double alphaN = 5 / 8 - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64;
+//		double aN     = 1. - alphaN;
+//		double bN     = alphaN / N;
+//		double c      = 0.375;
+//		double d      = 0.125;
+//
+//		auto f = [&N](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
+//
+//		// constructing Sigma
+//		LambdaPow(0, 0) = 1;
+//		LambdaPow(1, 1) = pow(0.625 - alphaN, n);
+//		int halfN       = (N % 2 == 1) ? ((N - 1) / 2) : (N / 2 - 1);
+//		int eigid     = 2;
+//		for (int i = 3; i <=halfN ; i++) {
+//			LambdaPow(eigid, eigid)             = pow(f(i - 2), n);
+//			LambdaPow(eigid + 1, eigid + 1) = pow(f(i - 2), n);
+//			eigid += 2;
+//		}
+//		if (eigid == N)
+//			LambdaPow(eigid, eigid) = pow(0.125, n);
+//
+//		// constructing Delta
+//		LambdaPow.bottomRightCorner<5, 5>().diagonal() = (Eigen::ArrayXd(5) << pow(0.125, n),
+//														  pow(0.125, n),
+//														  pow(0.125, n),
+//														  pow(0.0625, n),
+//														  pow(0.0525, n))
+//															 .finished();
+//	}
+//
+//	return LambdaPow;
+//}
+//
+//Eigen::MatrixXd FilterSubdivFittingPlugin::matrixSubdivEigenVector(int N)
+//{
+//	return Eigen::MatrixXd(0,0);
+//}
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSubdivFittingPlugin)
