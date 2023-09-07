@@ -61,6 +61,7 @@ public:
 	QString filterInfo(ActionIDType filter) const;
 	FilterClass getClass(const QAction* a) const;
 	FilterArity filterArity(const QAction*) const;
+	int getRequirements(const QAction* act);
 	int getPreConditions(const QAction *) const;
 	int postCondition(const QAction* ) const;
 	RichParameterList initParameterList(const QAction*, const MeshDocument& /*m*/);

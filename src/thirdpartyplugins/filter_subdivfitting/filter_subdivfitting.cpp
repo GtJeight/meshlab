@@ -25,6 +25,30 @@
 
 using namespace vcg;
 
+
+static int id(int i, int N)
+{
+	return ((i % N) + N) % N;
+}
+
+static int intPairHash(int m, int n)
+{
+	return (m + n) * (m + n + 1) / 2 + m + 1;
+}
+
+static std::pair<int, int> intPair(int h)
+{
+	int sum = -0.5 + 0.5 * sqrt(1. + 8. * h);
+	int acc = sum * (sum + 1) / 2;
+	int m   = h - acc - 1;
+	int n   = sum - (h - acc) + 1;
+	if (m < 0) {
+		m = sum - 1;
+		n = 0;
+	}
+	return std::make_pair(m, n);
+}
+
 /**
  * @brief
  * Constructor usually performs only two simple tasks of filling the two lists
@@ -113,6 +137,19 @@ FilterPlugin::FilterArity FilterSubdivFittingPlugin::filterArity(const QAction*)
 }
 
 /**
+ * @brief FilterSamplePlugin::getRequirements
+ * @return
+ */
+int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
+{
+	switch (ID(act)) {
+	case FP_SUBDIV_FITTING:
+		return MeshModel::MM_FACEFACETOPO | MeshModel::MM_VERTFACETOPO;
+	default: assert(0); return 0;
+	}
+}
+
+/**
  * @brief FilterSamplePlugin::getPreConditions
  * @return
  */
@@ -167,6 +204,12 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 			"Control mesh",
 			"Control mesh for subdivision"));
 		}
+		parlst.addParam(RichInt(
+			"testfaceid",
+			0,
+			"Test Face",
+			" "
+			" "));
 		break;
 	default :
 		assert(0);
@@ -193,8 +236,9 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	case FP_SUBDIV_FITTING: {
 		MeshModel* curMM = md.mm();
 		CMeshO&    m     = curMM->cm;
-		//for (size_t i = 0; i < m.fn; i++)
-		//	log("%d: %f, %f, %f\n", i, m.face[i].N()[0], m.face[i].N()[1], m.face[i].N()[2]);
+		vcg::tri::UpdateTopology<CMeshO>::FaceFace(md.mm()->cm);
+		vcg::tri::UpdateTopology<CMeshO>::VertexFace(md.mm()->cm);
+
 		if (!initflag) {
 			solveFootPoints(
 				*md.getMesh(par.getMeshId("samples")),
@@ -206,34 +250,34 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		else
 			log("already initialized!");
 
+
+		{
+			//m.face.EnableFFAdjacency();
+			//vcg::tri::RequireFFAdjacency(m);
+			int                    faceid  = par.getMeshId("testfaceid");
+			auto&                  tface   = m.face[faceid];
+			auto                   fp      = &m.face[faceid];
+			auto                   startfp = fp;
+			int                    vi      = 0;
+			int                    vid     = tface.V0(vi)->Index();
+			int                    prev    = tface.V0(id(vi - 1, 3))->Index();
+			int                    next    = tface.V0(id(vi + 1, 3))->Index();
+			vcg::face::Pos<CFaceO> p(fp, vi, fp->V0(vi));
+			do {
+				log("face: %d, vert: %d", p.F()->Index(), p.F()->V(p.F()->Next(p.z))->Index());
+				p.FlipF();
+				p.FlipE();
+				fp = p.F();
+			} while ((fp != startfp));
+
+
+		}
+
 	} break;
 	default :
 		wrongActionCalled(action);
 	}
 	return std::map<std::string, QVariant>();
-}
-
-static int id(int i, int N)
-{
-	return ((i % N) + N) % N;
-}
-
-static int intPairHash(int m, int n)
-{
-	return (m + n) * (m + n + 1) / 2 + m + 1;
-}
-
-static std::pair<int, int> intPair(int h)
-{
-	int sum = -0.5 + 0.5 * sqrt(1. + 8. * h);
-	int acc = sum * (sum + 1) / 2;
-	int m   = h - acc - 1;
-	int n   = sum - (h - acc) + 1;
-	if (m < 0) {
-		m = sum - 1;
-		n = 0;
-	}
-	return std::make_pair(m, n);
 }
 
 void FilterSubdivFittingPlugin::solveFootPoints(
@@ -386,7 +430,7 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 				matPatchSubdiv[fi] = std::vector<Eigen::MatrixXd>(4);
 				for (int vi = 0; vi < 3; vi++) {
 					int   vid  = fi->V(vi)->Index();
-					int   pre  = fi->V(id(vi - 1, 3))->Index();
+					int   prev = fi->V(id(vi - 1, 3))->Index();
 					int   next = fi->V(id(vi + 1, 3))->Index();
 					auto& mats = matPatchSubdiv[fi];
 					//mats[vi](0, {vid,pre,next}) = 
