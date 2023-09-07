@@ -195,20 +195,17 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		CMeshO&    m     = curMM->cm;
 		//for (size_t i = 0; i < m.fn; i++)
 		//	log("%d: %f, %f, %f\n", i, m.face[i].N()[0], m.face[i].N()[1], m.face[i].N()[2]);
-		solveFootPoints(
-			md,
-			*md.getMesh(par.getMeshId("samples")),
-			*md.getMesh(par.getMeshId("control_mesh")),
-			FootPointMode::MODE_SUBDIVISION);
+		if (!initflag) {
+			solveFootPoints(
+				*md.getMesh(par.getMeshId("samples")),
+				*md.getMesh(par.getMeshId("control_mesh")),
+				FootPointMode::MODE_SUBDIVISION);
 
-		{
-			//Eigen::MatrixXi P = matrixPickUP(7, 1);
-			//std::cout << P;
-			//int i = -1, N = 3;
-			//std::cout << ((i % N)+N)%N;
-
-			auto test = matrixPatchSubdiv(8, 2, true);
+			/*solvePickupVec(*md.getMesh(par.getMeshId("control_mesh")));*/
 		}
+		else
+			log("already initialized!");
+
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -216,8 +213,30 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	return std::map<std::string, QVariant>();
 }
 
+static int id(int i, int N)
+{
+	return ((i % N) + N) % N;
+}
+
+static int intPairHash(int m, int n)
+{
+	return (m + n) * (m + n + 1) / 2 + m + 1;
+}
+
+static std::pair<int, int> intPair(int h)
+{
+	int sum = -0.5 + 0.5 * sqrt(1. + 8. * h);
+	int acc = sum * (sum + 1) / 2;
+	int m   = h - acc - 1;
+	int n   = sum - (h - acc) + 1;
+	if (m < 0) {
+		m = sum - 1;
+		n = 0;
+	}
+	return std::make_pair(m, n);
+}
+
 void FilterSubdivFittingPlugin::solveFootPoints(
-	MeshDocument&    md,
 	MeshModel&       spl,
 	const MeshModel& ctrlm,
 	int              mode)
@@ -298,27 +317,83 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 	} break;
 	default: break;
 	}
+}
 
-	// test code for vertex attribute
-	//auto test1 = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(spl.cm, "FootTriangle");
-	//if (!tri::Allocator<CMeshO>::IsValidHandle<const CFaceO*>(spl.cm, test1)) {
-	//	throw MLException("attribute test failed");
-	//}
-	//for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
-	//	if (!(*vi).IsD()) {
-	//		log("%d\n", test1[vi] == nullptr);
-	//	}
-	//}
+void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
+{
+	if (!solveflag) {
+		// store valence for each vertex
+		CMeshO::PerVertexAttributeHandle<int> val;
+		if (tri::HasPerVertexAttribute(mm.cm, "Valence")) {
+			val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(
+				mm.cm, "Valence");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<int>(mm.cm, val)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
+		else
+			val = tri::Allocator<CMeshO>::AddPerVertexAttribute<int>(
+				mm.cm, "Valence");
 
-	//auto test2 = tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
-	//if (!tri::Allocator<CMeshO>::IsValidHandle<Point3f>(spl.cm, test2)) {
-	//	throw MLException("attribute test failed");
-	//}
-	//for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
-	//	if (!(*vi).IsD()) {
-	//		log("%f, %f, %f\n", test2[vi][0], test2[vi][1], test2[vi][2]);
-	//	}
-	//}
+		for (auto vi = mm.cm.vert.begin(); vi != mm.cm.vert.end(); vi++) {
+			if (!vi->IsD()) {
+				val[vi] = 0;
+			}
+		}
+
+		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+			if (!(*fi).IsD()) {
+				std::cout << fi->Index() << " ";
+				for (int vi = 0; vi < 3; vi++) {
+					val[fi->V(vi)->Index()] += 1;
+					std::cout << fi->V(vi)->Index() << " ";
+				}
+				std::cout << std::endl;
+			}
+		}
+
+		// Construc patch pickup matrix
+		CMeshO::PerFaceAttributeHandle<std::vector<Eigen::MatrixXd>> matPatchSubdiv;
+		if (tri::HasPerFaceAttribute(mm.cm, "PatchSubdiv")) {
+			matPatchSubdiv =
+				tri::Allocator<CMeshO>::FindPerFaceAttribute<std::vector<Eigen::MatrixXd>>(
+					mm.cm, "PatchSubdiv");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<std::vector<Eigen::MatrixXd>>(
+					mm.cm, matPatchSubdiv)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
+		else
+			matPatchSubdiv =
+				tri::Allocator<CMeshO>::AddPerFaceAttribute<std::vector<Eigen::MatrixXd>>(
+					mm.cm, "PatchSubdiv");
+
+		// 1.initialize to zero mat
+		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+			if (!(*fi).IsD()) {
+				matPatchSubdiv[fi] = std::vector<Eigen::MatrixXd>(4);
+				for (int vi = 0; vi < 3; vi++) {
+					int vid           = fi->V(vi)->Index();
+					matPatchSubdiv[fi][vi] = Eigen::MatrixXd::Zero(val[vid] + 6, mm.cm.vn);
+				}
+				matPatchSubdiv[fi][3] = Eigen::MatrixXd::Zero(12, mm.cm.vn);
+			}
+		}
+
+		// 2.fill in patch subdiv mat
+		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+			if (!(*fi).IsD()) {
+				matPatchSubdiv[fi] = std::vector<Eigen::MatrixXd>(4);
+				for (int vi = 0; vi < 3; vi++) {
+					int   vid  = fi->V(vi)->Index();
+					int   pre  = fi->V(id(vi - 1, 3))->Index();
+					int   next = fi->V(id(vi + 1, 3))->Index();
+					auto& mats = matPatchSubdiv[fi];
+					//mats[vi](0, {vid,pre,next}) = 
+				}
+			}
+		}
+	}
 }
 
 std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const CVertexO& _p,const CFaceO& _f)
@@ -397,23 +472,32 @@ FilterSubdivFittingPlugin::evaluateLimitPoint(const CFaceO* ft, const vcg::Point
 
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float v, float w)
 {
-	//Eigen::VectorXf b(N + 6);
-	//if (N == 6) {
-	//	
-	//}
+	// return dimension of 1*NV weight vector of all control points
 
-	auto b = weightsIrregularPatch(7, v, w);
+	for (int i = 0; i < 3; i++) {
+		const CVertexO* v = ft->V(i);
+	}
+
+	auto b = weightsIrregularPatch(9, v, w);
+	weightsIrregularPatch(10, v, w);
+	weightsIrregularPatch(11, v, w);
 
 
-	return Eigen::VectorXd::Zero(1);
+	return b;
 }
 
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v, float w)
 {
+	// return dimension of 1*(N+6) weight vector of control points in 1-ring of irregular patch
 	if (N == 6)
 		return weightsRegularPatch(1.f - v - w, v, w);
 
 	if (v + w < eps) {
+		// TODO: validate this formula
+		double          alphaN = 5. / 8. - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64.;
+		Eigen::VectorXd b = Eigen::VectorXd::Constant(N + 6, (8. / 3. * alphaN) / (1. + 8. / 3. * alphaN) / N);
+		b(3) = 1. / (1. + 8. / 3. * alphaN);
+		return b;
 	}
 	else {
 		int k    = -1;
@@ -440,19 +524,8 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v,
 		}
 		float u = 1.f - v - w;
 
-		auto B = weightsRegularPatch(u, v, w) * matrixPickUP(N, k) * matrixPatchSubdiv(N, n);
-
-		//Eigen::RowVectorXd b  = weightsRegularPatch(u, v, w);
-		//std::cout << "111111111111111" << std::endl;
-		//Eigen::MatrixXi    P  = matrixPickUP(N, k);
-		//std::cout << "222222222222222" << std::endl;
-		//Eigen::MatrixXd    A_ = matrixPatchSubdiv(N);
-		//std::cout << "333333333333333" << std::endl;
-
+		return weightsRegularPatch(u, v, w) * matrixPickup(N, k) * matrixPatchSubdiv(N, n);
 	}
-	
-
-	return Eigen::VectorXd::Zero(1);
 }
 
 Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float v, float w)
@@ -483,18 +556,24 @@ Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float
 	return b;
 }
 
-Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickUP(int N, int k)
+Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 {
+	assert(N >= 3);
+	auto cP = cacheP.find(intPairHash(N, k));
+	if (cP != cacheP.end())
+		return cP->second;
+
 	Eigen::MatrixXd P = Eigen::MatrixXd::Zero(12, N + 12);
 	switch (k) {
-
 	case 0: {
-		std::vector<int> idx {2, 0, N + 3, 1, N, N + 8, N + 2, N + 1, N + 4, N + 7, N + 6, N + 9};
+		std::vector<int> idx {
+			2, 0, N + 3, 1, N, N + 8, N + 2, N + 1, N + 4, N + 7, N + 6, N + 9};
 		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
 	} break;
 
 	case 1: {
-		std::vector<int> idx {N + 9, N + 6, N + 4, N + 1, N + 2, N + 5, N, 1, N + 3, N - 1, 0, 2};
+		std::vector<int> idx {
+			N + 9, N + 6, N + 4, N + 1, N + 2, N + 5, N, 1, N + 3, N - 1, 0, 2};
 		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
 	} break;
 
@@ -506,76 +585,109 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickUP(int N, int k)
 
 	default: break;
 	}
+	cacheP[intPairHash(N, k)] = P;
 	return P;
+
 }
 
-static int id(int i, int N)
-{
-	return ((i % N) + N) % N;
-}
-
-Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool test)
+Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n)
 {
 	assert(N >= 3 && n >= 1);
+	auto cabap = cacheAbarApow.find(intPairHash(N, n));
+	if (cabap != cacheAbarApow.end())
+		return cabap->second;
+
 	double          alphaN = 5. / 8. - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64.;
 	double          aN     = 1. - alphaN;
 	double          bN     = alphaN / N;
 	double          c      = 0.375;
 	double          d      = 0.125;
-	Eigen::MatrixXd A_ = Eigen::MatrixXd::Zero(N + 12, N + 6);
+	Eigen::MatrixXd A_;
 
 	// constructing S
-	// 1-ring neighbor of EV
-	A_(0, 0) = aN;
-	A_(0,Eigen::seq(1,N)).array() = bN;
-	Eigen::RowVector4d cd(c, c, d, d);
-	for (int i = 1; i < N + 1; i++) {
-		A_(i, {0, i, 1 + id(i - 2, N), 1 + id(i, N)}) = cd;
+	auto cab = cacheAbar.find(N);
+	if (cab != cacheAbar.end())
+		A_ = cab->second;
+	else {
+		A_ = Eigen::MatrixXd::Zero(N + 12, N + 6);
+		// 1-ring neighbor of EV
+		A_(0, 0)                        = aN;
+		A_(0, Eigen::seq(1, N)).array() = bN;
+		Eigen::RowVector4d cd(c, c, d, d);
+		for (int i = 1; i < N + 1; i++) {
+			A_(i, {0, i, 1 + id(i - 2, N), 1 + id(i, N)}) = cd;
+		}
+
+		// constructing S_11,S_12,S_21 and S_22
+		// edge vertices
+		A_(N + 1, {1, N, 0, N + 1})          = cd;
+		A_(N + 3, {1, 2, 0, N + 3})          = cd;
+		A_(N + 5, {N - 1, N, 0, N + 5})      = cd;
+		A_(N + 6, {1, N + 1, N, N + 2})      = cd;
+		A_(N + 7, {1, N + 2, N + 1, N + 3})  = cd;
+		A_(N + 8, {1, N + 3, 2, N + 2})      = cd;
+		A_(N + 9, {N, N + 1, 1, N + 4})      = cd;
+		A_(N + 10, {N, N + 4, N + 1, N + 5}) = cd;
+		A_(N + 11, {N, N + 5, N - 1, N + 4}) = cd;
+		// vertex vertices
+		A_(N + 2, {1, 0, 2, N + 3, N + 2, N + 1, N}) =
+			(Eigen::ArrayXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
+		A_(N + 4, {N, 0, 1, N + 1, N + 4, N + 5, N - 1}) =
+			(Eigen::ArrayXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
+
+		cacheAbar[N] = A_;
+
+		if (n == 1) {
+			cacheAbarApow[intPairHash(N, n)] = A_;
+			return A_;
+		}
 	}
 
-	// constructing S_11,S_12,S_21 and S_22
-	// edge vertices
-	A_(N + 1, {1, N, 0, N + 1}) = cd;
-	A_(N + 3, {1, 2, 0, N + 3}) = cd;
-	A_(N + 5, {N - 1, N, 0, N + 5}) = cd;
-	A_(N + 6, {1, N + 1, N, N + 2}) = cd;
-	A_(N + 7, {1, N + 2, N + 1, N + 3}) = cd;
-	A_(N + 8, {1, N + 3, 2, N + 2})     = cd;
-	A_(N + 9, {N, N + 1, 1, N + 4})     = cd;
-	A_(N + 10, {N, N + 4, N + 1, N + 5}) = cd;
-	A_(N + 11, {N, N + 5, N - 1, N + 4}) = cd;
-	// vertex vertices
-	A_(N + 2, {1, 0, 2, N + 3, N + 2, N + 1, N}) =
-		(Eigen::ArrayXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
-	A_(N + 4, {N, 0, 1, N + 1, N + 4, N + 5, N - 1}) =
-		(Eigen::ArrayXd(7) << 0.625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625, 0.0625).finished();
-
-	if (n == 1)
-		return A_;
-
 	// constructing eigen structure of A and submatrix S
-	Eigen::MatrixXd LambdaPow = Eigen::MatrixXd::Zero(N + 6, N + 6);
-	Eigen::MatrixXd V = Eigen::MatrixXd::Zero(N + 6, N + 6);
+	Eigen::MatrixXd LambdaPow;
+	Eigen::MatrixXd V;
+	Eigen::MatrixXd V_inv;
+	bool            computeV;
+	auto            cV = cacheV.find(N);
+	if (cV != cacheV.end()) {
+		V        = cV->second;
+		V_inv    = cacheVinv[N];
+		computeV = false;
+	}
+	else {
+		computeV = true;
+		V        = Eigen::MatrixXd::Zero(N + 6, N + 6);
+		V_inv    = Eigen::MatrixXd::Zero(N + 6, N + 6);
+	}
 
 	if (N == 3) {
+		LambdaPow = Eigen::MatrixXd::Zero(9, 9);
 		LambdaPow.diagonal() << 1, pow(0.25, n - 1), pow(0.25, n - 1), pow(0.125, n - 1),
 			pow(0.125, n - 1), pow(0.125, n - 1), pow(0.0625, n - 1), pow(0.0625, n - 1),
 			pow(0.0625, n - 1);
 		LambdaPow(N + 4, N + 5) = (n - 1) / pow(16., n - 2);
-		V << 1, 0, 0, 0, 0, 0, 0, 0, 33, 1, 0, 1, 0, 0, 0, 0, 0, -22, 1, -1, -1, 0, 0, 0, 0, 0, -22,
-			1, 1, 0, 0, 0, 0, 0, 0, -22, 1, 3, 3, 1, -1, 0, 0, 0, 198, 1, 0, 4, 1, 0, 0, 0,
-			165. / 16., 473, 1, -3, 0, 0, 1, 0, 0, 0, 198, 1, 4, 0, 0, 0, 1, 1, 165. / 16., 438, 1, 0,
-			-3, - 1, 1, 1, 0, 0, 198;
-		Eigen::MatrixXd V_inv = Eigen::MatrixXd::Zero(N + 6, N + 6);
-		V_inv << 0.4, 0.2, 0.2, 0.2, 0, 0, 0, 0, 0, 0, -1. / 3., -1. / 3., 2. / 3., 0, 0, 0, 0, 0, 0,
-			2. / 3., -1. / 3., -1. / 3., 0, 0, 0, 0, 0, -8, 0, 3, 3, 1, 0, 1, 0, 0, -4, 0, 0, 3, 0, 0, 1,
-			0, 0, -8, 3, 3, 0, 1, 0, 0, 0, 1, 7. / 11., 26. / 33., -7. / 33., -40. / 33., 0, -1, 1, 1, -1,
-			-16. / 165., 0, 16. / 165., 16. / 165., -16. / 165., 16. / 165., -16. / 165., 0, 0, 1. / 55.,
-			-1. / 165., -1. / 165., -1. / 165., 0, 0, 0, 0, 0;
 
-		return A_ * V * LambdaPow * V_inv;
+		if (computeV) {
+			V << 1, 0, 0, 0, 0, 0, 0, 0, 33, 1, 0, 1, 0, 0, 0, 0, 0, -22, 1, -1, -1, 0, 0, 0, 0, 0,
+				-22, 1, 1, 0, 0, 0, 0, 0, 0, -22, 1, 3, 3, 1, -1, 0, 0, 0, 198, 1, 0, 4, 1, 0, 0, 0,
+				165. / 16., 473, 1, -3, 0, 0, 1, 0, 0, 0, 198, 1, 4, 0, 0, 0, 1, 1, 165. / 16., 438,
+				1, 0, -3, -1, 1, 1, 0, 0, 198;
+			V_inv << 0.4, 0.2, 0.2, 0.2, 0, 0, 0, 0, 0, 0, -1. / 3., -1. / 3., 2. / 3., 0, 0, 0, 0,
+				0, 0, 2. / 3., -1. / 3., -1. / 3., 0, 0, 0, 0, 0, -8, 0, 3, 3, 1, 0, 1, 0, 0, -4, 0,
+				0, 3, 0, 0, 1, 0, 0, -8, 3, 3, 0, 1, 0, 0, 0, 1, 7. / 11., 26. / 33., -7. / 33.,
+				-40. / 33., 0, -1, 1, 1, -1, -16. / 165., 0, 16. / 165., 16. / 165., -16. / 165.,
+				16. / 165., -16. / 165., 0, 0, 1. / 55., -1. / 165., -1. / 165., -1. / 165., 0, 0,
+				0, 0, 0;
+			cacheV[N] = V;
+			cacheVinv[N] = V_inv;
+		}
+
+		cacheAbarApow[intPairHash(N, n)] = A_ * V * LambdaPow * V_inv;
+
+		return cacheAbarApow[intPairHash(N, n)];
 	}
 	else {
+		LambdaPow      = Eigen::MatrixXd::Zero(N + 6, N + 6);
 		auto f = [&](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
 		auto pairedEig = [&](int k) -> double {
 			return (k == 0) ? 1 : (k == 1 ? (0.625 - alphaN) : f(k / 2));
@@ -590,45 +702,54 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool 
 		for (int i = 3; i <= halfN; i++) {
 			LambdaPow(eigid, eigid)         = pow(f(i - 2), n - 1);
 			LambdaPow(eigid + 1, eigid + 1) = pow(f(i - 2), n - 1);
-			V(Eigen::seq(1, N), eigid).array()     = (2 * M_PI * (i - 2.) / N * idseq).cos();
-			V(Eigen::seq(1, N), eigid + 1).array() = (2 * M_PI * (i - 2.) / N * idseq).sin();
+			if (computeV) {
+				V(Eigen::seq(1, N), eigid).array()     = (2 * M_PI * (i - 2.) / N * idseq).cos();
+				V(Eigen::seq(1, N), eigid + 1).array() = (2 * M_PI * (i - 2.) / N * idseq).sin();
+			}
 			eigid += 2;
 		}
 		if (eigid == N) {
 			LambdaPow(eigid, eigid)    = pow(0.125, n - 1);
-			V(Eigen::seq(1, N), eigid).array() = (2 * M_PI * (halfN - 1.) / N * idseq).cos();
-		}
-		V(Eigen::placeholders::all, {0, 1}).array() = 1;
-		V(0,1) = -8./3.*alphaN;
-
-		// constructing U1
-		auto S_11U0 =
-			A_(Eigen::seq(N + 1, N + 5), Eigen::seq(0, N)) * V.topLeftCorner(N + 1, N + 1);
-		auto S_12 = A_(Eigen::seq(N + 1, N + 5), Eigen::seq(N + 1, N + 5));
-		if (N % 2 == 1) {
-			for (int col = 0; col < N + 1; col++) {
-				V(Eigen::seq(N + 1, N + 5), col) =
-					(pairedEig(col) * Eigen::MatrixXd::Identity(5, 5) - S_12)
-						.colPivHouseholderQr()
-						.solve(S_11U0(Eigen::placeholders::all, col));
-				std::cout << pairedEig(col) << std::endl;
+			if (computeV) {
+				V(Eigen::seq(1, N), eigid).array() = (2 * M_PI * (halfN - 1.) / N * idseq).cos();
 			}
 		}
-		else {
-			for (int col = 0; col < N; col++) {
-				V(Eigen::seq(N + 1, N + 5), col) =
-					(pairedEig(col)*Eigen::MatrixXd::Identity(5,5) - S_12)
-						.colPivHouseholderQr()
-						.solve(S_11U0(Eigen::placeholders::all, col));
-				std::cout << pairedEig(col) << std::endl;
+
+
+		if (computeV) {
+			V(Eigen::placeholders::all, {0, 1}).array() = 1;
+			V(0, 1)                                     = -8. / 3. * alphaN;
+
+					// constructing U1
+			auto S_11U0 =
+				A_(Eigen::seq(N + 1, N + 5), Eigen::seq(0, N)) * V.topLeftCorner(N + 1, N + 1);
+			auto S_12 = A_(Eigen::seq(N + 1, N + 5), Eigen::seq(N + 1, N + 5));
+			if (N % 2 == 1) {
+				for (int col = 0; col < N + 1; col++) {
+					V(Eigen::seq(N + 1, N + 5), col) =
+						(pairedEig(col) * Eigen::MatrixXd::Identity(5, 5) - S_12)
+							.colPivHouseholderQr()
+							.solve(S_11U0(Eigen::placeholders::all, col));
+					std::cout << pairedEig(col) << std::endl;
+				}
 			}
-			V(Eigen::seq(N + 1, N + 5), N) << 0, 8, 0, -8, 0;
+			else {
+				for (int col = 0; col < N; col++) {
+					V(Eigen::seq(N + 1, N + 5), col) =
+						(pairedEig(col) * Eigen::MatrixXd::Identity(5, 5) - S_12)
+							.colPivHouseholderQr()
+							.solve(S_11U0(Eigen::placeholders::all, col));
+				}
+				V(Eigen::seq(N + 1, N + 5), N) << 0, 8, 0, -8, 0;
+			}
+
+			// constructing W1
+			V.bottomRightCorner<5, 5>() << 0, -1, 1, 0, 0, 1, -1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1,
+				1, 0, 0, 1, 0, 0, 0;
+
+			cacheV[N]    = V;
+			cacheVinv[N] = V.inverse();
 		}
-
-
-		// constructing W1
-		V.bottomRightCorner<5, 5>() << 0, -1, 1, 0, 0, 1, -1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0,
-			0, 1, 0, 0, 0;
 
 		// constructing Delta
 		LambdaPow.bottomRightCorner<5, 5>().diagonal() = (Eigen::ArrayXd(5) << pow(0.125, n - 1),
@@ -637,61 +758,11 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n, bool 
 														  pow(0.0625, n - 1),
 														  pow(0.0625, n - 1))
 															 .finished();
-
-		if (test) {
-			std::cout << halfN << std::endl;
-			std::cout << "A:\n" << A_(Eigen::seq(0, N + 5), Eigen::placeholders::all) << std::endl;
-			std::cout << "V:\n" << V << std::endl;
-			std::cout << "VLV:\n" << V * LambdaPow * V.inverse() << std::endl;
-		}
 	}
 
-	return A_*V*LambdaPow*V.inverse();
+	cacheAbarApow[intPairHash(N, n)] = A_ * V * LambdaPow * cacheVinv[N];
+	return cacheAbarApow[intPairHash(N, n)];
 }
-//
-//Eigen::MatrixXd FilterSubdivFittingPlugin::matrixSubdivEigen(int N,int n)
-//{
-//	Eigen::MatrixXd LambdaPow = Eigen::MatrixXd::Zero(N + 6, N + 6);
-//	if (N == 3) {
-//
-//	}
-//	else {
-//		double alphaN = 5 / 8 - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64;
-//		double aN     = 1. - alphaN;
-//		double bN     = alphaN / N;
-//		double c      = 0.375;
-//		double d      = 0.125;
-//
-//		auto f = [&N](int k) -> double { return 0.375 + 0.25 * cos(2 * M_PI * k / N); };
-//
-//		// constructing Sigma
-//		LambdaPow(0, 0) = 1;
-//		LambdaPow(1, 1) = pow(0.625 - alphaN, n);
-//		int halfN       = (N % 2 == 1) ? ((N - 1) / 2) : (N / 2 - 1);
-//		int eigid     = 2;
-//		for (int i = 3; i <=halfN ; i++) {
-//			LambdaPow(eigid, eigid)             = pow(f(i - 2), n);
-//			LambdaPow(eigid + 1, eigid + 1) = pow(f(i - 2), n);
-//			eigid += 2;
-//		}
-//		if (eigid == N)
-//			LambdaPow(eigid, eigid) = pow(0.125, n);
-//
-//		// constructing Delta
-//		LambdaPow.bottomRightCorner<5, 5>().diagonal() = (Eigen::ArrayXd(5) << pow(0.125, n),
-//														  pow(0.125, n),
-//														  pow(0.125, n),
-//														  pow(0.0625, n),
-//														  pow(0.0525, n))
-//															 .finished();
-//	}
-//
-//	return LambdaPow;
-//}
-//
-//Eigen::MatrixXd FilterSubdivFittingPlugin::matrixSubdivEigenVector(int N)
-//{
-//	return Eigen::MatrixXd(0,0);
-//}
+
 
 MESHLAB_PLUGIN_NAME_EXPORTER(FilterSubdivFittingPlugin)

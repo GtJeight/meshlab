@@ -73,17 +73,23 @@ public:
 
 private:
 	// Implement following https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/loop.pdf
-	void solveFootPoints(MeshDocument& md, MeshModel& spl, const MeshModel& ctrlm, int mode);
+	void solveFootPoints(MeshModel& spl, const MeshModel& ctrlm, int mode);
+	void solvePickupVec(MeshModel& mm);
 	std::pair<float,vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
 	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
 	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
-	Eigen::VectorXd               weightsIrregularPatch(int V, float v, float w);
-	Eigen::RowVectorXd            weightsRegularPatch(float u, float v, float w);
-	Eigen::MatrixXd               matrixPickUP(int N, int k);
-	Eigen::MatrixXd               matrixPatchSubdiv(int N, int n, bool test = false);
-	//Eigen::MatrixXd               matrixSubdivEigen(int N, int n);
-	//Eigen::MatrixXd               matrixSubdivEigenVector(int N);
-	float                         eps = 1.f / 64.f;
+	Eigen::VectorXd                weightsIrregularPatch(int V, float v, float w);
+	Eigen::RowVectorXd             weightsRegularPatch(float u, float v, float w);
+	Eigen::MatrixXd                matrixPickup(int N, int k);
+	Eigen::MatrixXd                matrixPatchSubdiv(int N, int n);
+	float                          eps       = 1.f / 64.f;
+	bool                           initflag  = false;
+	bool                           solveflag = false;
+	std::map<int, Eigen::MatrixXd> cacheP;
+	std::map<int, Eigen::MatrixXd> cacheAbar;
+	std::map<int, Eigen::MatrixXd> cacheV;
+	std::map<int, Eigen::MatrixXd> cacheVinv;
+	std::map<int, Eigen::MatrixXd> cacheAbarApow;
 };
 
 #endif //MESHLAB_FILTER_SUBDIVFITTING_PLUGIN_H
