@@ -26,6 +26,7 @@
 
 // from meshlab common, include the abstract class file of filter plugins
 #include <common/plugins/interfaces/filter_plugin.h>
+#include <Eigen/Sparse>
 
 /**
  * @brief The FilterSubdivFittingPlugin class
@@ -51,6 +52,7 @@ public:
 	//enum used to give an ID to every filter implemented in the plugin
 	enum FileterIds {FP_SUBDIV_FITTING};
 	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
+	enum UpdateOptions { MODE_INIT = 0, MODE_UPDATE = 1 };
 
 	FilterSubdivFittingPlugin();
 
@@ -77,6 +79,7 @@ private:
 	void solveFootPoints(MeshModel& spl, const MeshModel& ctrlm, int mode);
 	void solvePickupVec(MeshModel& mm);
 	std::pair<float,vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
+	void                           updateLimitStencils(MeshModel& spl, UpdateOptions mode);
 	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
 	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
 	Eigen::VectorXd                weightsIrregularPatch(int V, float v, float w);

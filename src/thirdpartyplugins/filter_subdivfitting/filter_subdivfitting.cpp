@@ -49,6 +49,11 @@ static std::pair<int, int> intPair(int h)
 	return std::make_pair(m, n);
 }
 
+static double alpha(int N)
+{
+	return 0.625 - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64.;
+}
+
 /**
  * @brief
  * Constructor usually performs only two simple tasks of filling the two lists
@@ -245,33 +250,35 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 				*md.getMesh(par.getMeshId("control_mesh")),
 				FootPointMode::MODE_SUBDIVISION);
 
-			/*solvePickupVec(*md.getMesh(par.getMeshId("control_mesh")));*/
+			solvePickupVec(*md.getMesh(par.getMeshId("control_mesh")));
 		}
 		else
 			log("already initialized!");
 
-
-		{
-			//m.face.EnableFFAdjacency();
-			//vcg::tri::RequireFFAdjacency(m);
-			int                    faceid  = par.getMeshId("testfaceid");
-			auto&                  tface   = m.face[faceid];
-			auto                   fp      = &m.face[faceid];
-			auto                   startfp = fp;
-			int                    vi      = 0;
-			int                    vid     = tface.V0(vi)->Index();
-			int                    prev    = tface.V0(id(vi - 1, 3))->Index();
-			int                    next    = tface.V0(id(vi + 1, 3))->Index();
-			vcg::face::Pos<CFaceO> p(fp, vi, fp->V0(vi));
-			do {
-				log("face: %d, vert: %d", p.F()->Index(), p.F()->V(p.F()->Next(p.z))->Index());
-				p.FlipF();
-				p.FlipE();
-				fp = p.F();
-			} while ((fp != startfp));
+		
 
 
-		}
+		//{
+		//	//m.face.EnableFFAdjacency();
+		//	//vcg::tri::RequireFFAdjacency(m);
+		//	int                    faceid  = par.getMeshId("testfaceid");
+		//	auto&                  tface   = m.face[faceid];
+		//	auto                   fp      = &m.face[faceid];
+		//	auto                   startfp = fp;
+		//	int                    vi      = 0;
+		//	int                    vid     = tface.V0(vi)->Index();
+		//	int                    prev    = tface.V0(id(vi - 1, 3))->Index();
+		//	int                    next    = tface.V0(id(vi + 1, 3))->Index();
+		//	vcg::face::Pos<CFaceO> p(fp, vi, fp->V0(vi));
+		//	do {
+		//		log("face: %d, vert: %d", p.F()->Index(), p.F()->V(p.F()->Next(p.z))->Index());
+		//		p.FlipF();
+		//		p.FlipE();
+		//		fp = p.F();
+		//	} while ((fp != startfp));
+
+
+		//}
 
 	} break;
 	default :
@@ -365,7 +372,9 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 
 void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 {
-	if (!solveflag) {
+	if (!initflag) {
+		mm.cm.face.EnableFFAdjacency();
+		tri::UpdateTopology<CMeshO>::FaceFace(mm.cm);
 		// store valence for each vertex
 		CMeshO::PerVertexAttributeHandle<int> val;
 		if (tri::HasPerVertexAttribute(mm.cm, "Valence")) {
@@ -385,18 +394,7 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 			}
 		}
 
-		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
-			if (!(*fi).IsD()) {
-				std::cout << fi->Index() << " ";
-				for (int vi = 0; vi < 3; vi++) {
-					val[fi->V(vi)->Index()] += 1;
-					std::cout << fi->V(vi)->Index() << " ";
-				}
-				std::cout << std::endl;
-			}
-		}
-
-		// Construc patch pickup matrix
+		// Register patch pickup matrix attribute
 		CMeshO::PerFaceAttributeHandle<std::vector<Eigen::MatrixXd>> matPatchSubdiv;
 		if (tri::HasPerFaceAttribute(mm.cm, "PatchSubdiv")) {
 			matPatchSubdiv =
@@ -412,29 +410,180 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 				tri::Allocator<CMeshO>::AddPerFaceAttribute<std::vector<Eigen::MatrixXd>>(
 					mm.cm, "PatchSubdiv");
 
-		// 1.initialize to zero mat
+		// initialize subdiv mat
 		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
 			if (!(*fi).IsD()) {
-				matPatchSubdiv[fi] = std::vector<Eigen::MatrixXd>(4);
+				matPatchSubdiv[fi].resize(4);
 				for (int vi = 0; vi < 3; vi++) {
-					int vid           = fi->V(vi)->Index();
+					// allocate zero mat
+					int vid                = fi->V(vi)->Index();
 					matPatchSubdiv[fi][vi] = Eigen::MatrixXd::Zero(val[vid] + 6, mm.cm.vn);
 				}
 				matPatchSubdiv[fi][3] = Eigen::MatrixXd::Zero(12, mm.cm.vn);
 			}
 		}
 
-		// 2.fill in patch subdiv mat
+		
 		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
 			if (!(*fi).IsD()) {
-				matPatchSubdiv[fi] = std::vector<Eigen::MatrixXd>(4);
+				CFaceO*          startfp = &*fi;
+				std::vector<int> ring1, ring2, ringNp;
+
+				// construct irregular patch subdiv mat
 				for (int vi = 0; vi < 3; vi++) {
-					int   vid  = fi->V(vi)->Index();
-					int   prev = fi->V(id(vi - 1, 3))->Index();
-					int   next = fi->V(id(vi + 1, 3))->Index();
-					auto& mats = matPatchSubdiv[fi];
-					//mats[vi](0, {vid,pre,next}) = 
+					// pick vertice's id in rings
+					int vid  = fi->V(vi)->Index();
+					int prev = fi->V(fi->Prev(vi))->Index();
+					int next = fi->V(fi->Next(vi))->Index();
+					int id1  = vi;
+					int id2  = fi->Next(id1);
+					int idNp = fi->Prev(id1);
+					ring1.clear();
+					ring2.clear();
+					ringNp.clear();
+					ring1.reserve(val[fi->V0(id1)]);
+					ring2.reserve(val[fi->V0(id2)]);
+					ringNp.reserve(val[fi->V0(idNp)]);
+
+					CFaceO*                fp = startfp;
+					vcg::face::Pos<CFaceO> p(fp, id1, startfp->V0(id1));
+
+					// ring1 circulate
+					do {
+						ring1.push_back(fp->V(fp->Next(p.z))->Index());
+						p.FlipF();
+						p.FlipE();
+						fp = p.F();
+					} while (fp != startfp);
+
+					// ring2 criculate
+					p.Set(fp, id1, startfp->V0(id2));
+					do {
+						ring2.push_back(fp->V(p.z)->Index());
+						p.FlipE();
+						p.FlipF();
+						fp = p.F();
+					} while (fp != startfp);
+
+					// ringNp circulate
+					p.Set(fp, idNp, startfp->V0(idNp));
+					do {
+						ringNp.push_back(fp->V(fp->Next(p.z))->Index());
+						p.FlipF();
+						p.FlipE();
+						fp = p.F();
+					} while (fp != startfp);
+
+					// start filling mats
+					int N                                    = val[vid];
+					matPatchSubdiv[fi][vi](0, vid)           = 1 - alpha(N);
+					matPatchSubdiv[fi][vi](0, ring1).array() = alpha(N) / N;
+					for (int i = 0; i < val[vid]; i++) {
+						matPatchSubdiv[fi][vi](i, vid)                     = 0.375;
+						matPatchSubdiv[fi][vi](i, ring1[i])                = 0.375;
+						matPatchSubdiv[fi][vi](1 + id(i - 2, N), ring1[i]) = 0.125;
+						matPatchSubdiv[fi][vi](1 + id(i, N), ring1[i])     = 0.125;
+					}
+					matPatchSubdiv[fi][vi]({N + 1, N + 3}, next).array() = 0.375;
+					matPatchSubdiv[fi][vi]({N + 1, N + 5}, prev).array() = 0.375;
+
+					matPatchSubdiv[fi][vi](N + 2, next)           = 1 - alpha(val[next]);
+					matPatchSubdiv[fi][vi](N + 2, ring2).array()  = alpha(val[next]) / val[next];
+					matPatchSubdiv[fi][vi](N + 4, prev)           = 1 - alpha(val[prev]);
+					matPatchSubdiv[fi][vi](N + 4, ringNp).array() = alpha(val[next]) / val[next];
 				}
+
+				////test
+				//std::cout << "face: " << fi->Index()<<std::endl;
+				//std::cout << "vert0: " << fi->V(0)->Index();
+				//std::cout << std::endl << "ring1: ";
+				//for (int i : ring1)
+				//	std::cout << i << " ";
+				//std::cout << std::endl << "ring2: ";
+				//for (int i : ring2)
+				//	std::cout << i << " ";
+				//std::cout << std::endl << "ringNp: ";
+				//for (int i : ringNp)
+				//	std::cout << i << " ";
+				//std::cout << std::endl << std::endl;
+
+				// construct regular patch subdiv mat
+				Eigen::Array4d tempedge({0.375, 0.375, 0.125, 0.125});
+
+				// vert 1
+				matPatchSubdiv[fi][3](
+					0,
+					{fi->V2(0)->Index(),
+					 ring1[id(-2, ring1.size())],
+					 ring1[id(-1, ring1.size())],
+					 ring1[id(-3, ring1.size())]})
+					.array() = tempedge;
+
+				// vert 2
+				matPatchSubdiv[fi][3](1, {fi->V2(2)->Index(), ringNp[1], ringNp[0], ringNp[2]})
+					.array() = tempedge;
+
+				// vert 3
+				matPatchSubdiv[fi][3](2, fi->V2(0)->Index()) = 1 - alpha(ring1.size());
+				matPatchSubdiv[fi][3](2, ring1).array()      = alpha(ring1.size()) / ring1.size();
+
+				// vert 4
+				matPatchSubdiv[fi][3](
+					3,
+					{fi->V2(0)->Index(),
+					 fi->V2(2)->Index(),
+					 ring1[0],
+					 ringNp[1]})
+					.array() = tempedge;
+
+				// vert 5
+				matPatchSubdiv[fi][3](4, fi->V2(2)->Index()) = 1 - alpha(ringNp.size());
+				matPatchSubdiv[fi][3](4, ringNp).array()     = alpha(ringNp.size()) / ringNp.size();
+
+				// vert 6
+				matPatchSubdiv[fi][3](5, {fi->V2(0)->Index(), ring1[1], ring1[0], ring1[2]})
+					.array() = tempedge;
+
+				// vert 7
+				matPatchSubdiv[fi][3](
+					6, {fi->V2(0)->Index(), ring1[0], ring1[1], ring1[id(-1, ring1.size())]})
+					.array() = tempedge;
+
+				// vert 8
+				matPatchSubdiv[fi][3](
+					7,
+					{fi->V2(2)->Index(),
+					 ringNp[id(-1, ringNp.size())],
+					 ringNp[0],
+					 ringNp[id(-2, ringNp.size())]})
+					.array() = tempedge;
+
+				// vert 9
+				matPatchSubdiv[fi][3](
+					8,
+					{fi->V2(2)->Index(),
+					 ringNp[id(-2, ringNp.size())],
+					 ringNp[id(-1, ringNp.size())],
+					 ringNp[id(-3, ringNp.size())]})
+					.array() = tempedge;
+
+				// vert 10
+				matPatchSubdiv[fi][3](
+					9,
+					{fi->V2(1)->Index(),
+					 ring2[id(-1, ring2.size())],
+					 ring2[0],
+					 ring2[id(-2, ring2.size())]})
+					.array() = tempedge;
+
+				// vert 11
+				matPatchSubdiv[fi][3](10, fi->V2(1)->Index()) = 1 - alpha(ring2.size());
+				matPatchSubdiv[fi][3](10, ring2).array()      = alpha(ring2.size()) / ring2.size();
+
+				// vert 12
+				matPatchSubdiv[fi][3](
+					11, {fi->V2(1)->Index(), ring2[2], ring2[1], ring2[id(3, ring2.size())]})
+					.array() = tempedge;
 			}
 		}
 	}
@@ -507,6 +656,31 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 		sqrtf(height * height + squared_parallel_dist), Point3f(l0, l1, l2));
 }
 
+void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOptions mode) {
+	switch (mode) {
+	case FilterSubdivFittingPlugin::MODE_INIT: {
+		CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls;
+		if (tri::HasPerVertexAttribute(spl.cm, "LimitStencil")) {
+			ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+				spl.cm, "LimitStencil");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<Eigen::SparseVector<double>>(
+					spl.cm, ls)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
+
+		// foot points should be solved now
+		CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptr;
+		CMeshO::PerVertexAttributeHandle<Point3f>       ftbarycoord;
+		for (auto vi = spl.cm.face.begin(); vi != spl.cm.face.end(); vi++) {
+
+		}
+	} break;
+	case FilterSubdivFittingPlugin::MODE_UPDATE: break;
+	default: break;
+	}
+}
+
 Point3f
 FilterSubdivFittingPlugin::evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord)
 {
@@ -538,7 +712,7 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v,
 
 	if (v + w < eps) {
 		// TODO: validate this formula
-		double          alphaN = 5. / 8. - pow((3 + 2 * cos(2 * M_PI / N)), 2) / 64.;
+		double          alphaN = alpha(N);
 		Eigen::VectorXd b = Eigen::VectorXd::Constant(N + 6, (8. / 3. * alphaN) / (1. + 8. / 3. * alphaN) / N);
 		b(3) = 1. / (1. + 8. / 3. * alphaN);
 		return b;
@@ -774,7 +948,6 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n)
 						(pairedEig(col) * Eigen::MatrixXd::Identity(5, 5) - S_12)
 							.colPivHouseholderQr()
 							.solve(S_11U0(Eigen::placeholders::all, col));
-					std::cout << pairedEig(col) << std::endl;
 				}
 			}
 			else {
