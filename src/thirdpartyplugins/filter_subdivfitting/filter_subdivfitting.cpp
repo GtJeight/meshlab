@@ -241,16 +241,18 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	case FP_SUBDIV_FITTING: {
 		MeshModel* curMM = md.mm();
 		CMeshO&    m     = curMM->cm;
-		vcg::tri::UpdateTopology<CMeshO>::FaceFace(md.mm()->cm);
-		vcg::tri::UpdateTopology<CMeshO>::VertexFace(md.mm()->cm);
+
+		ptsample   = md.getMesh(par.getMeshId("samples"));
+		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
 
 		if (!initflag) {
-			solveFootPoints(
-				*md.getMesh(par.getMeshId("samples")),
-				*md.getMesh(par.getMeshId("control_mesh")),
-				FootPointMode::MODE_SUBDIVISION);
+			updatePerVertexValence(*ptctrlmesh);
 
-			solvePickupVec(*md.getMesh(par.getMeshId("control_mesh")));
+			solvePickupVec(*ptctrlmesh);
+
+			solveFootPoints(*ptsample, *ptctrlmesh, FootPointMode::MODE_MESH);
+
+			updateLimitStencils(*ptsample, UpdateOptions::MODE_INIT);
 		}
 		else
 			log("already initialized!");
@@ -334,14 +336,16 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 		for (auto si = spl.cm.vert.begin(); si != spl.cm.vert.end(); si++) {
 			std::pair<float, vcg::Point3f> minpair(
 				std::numeric_limits<float>::max(), Point3f(0.f, 0.f, 0.f));
-			const CFaceO*                  footface = nullptr;
+			const CFaceO* footface = nullptr;
 			for (auto fi = ctrlm.cm.face.begin(); fi != ctrlm.cm.face.end(); fi++) {
 				auto d = distancePointTriangle(*si, *fi);
 				if (d.first < minpair.first) {
-					minpair = d;
+					minpair  = d;
 					footface = &(*fi);
 				}
 			}
+			ftptrs[si]       = footface;
+			ftbarycoords[si] = minpair.second;
 		}
 	} break;
 	case FootPointMode::MODE_SUBDIVISION: {
@@ -370,27 +374,44 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 	}
 }
 
+void FilterSubdivFittingPlugin::updatePerVertexValence(MeshModel& mm)
+{
+	mm.cm.face.EnableFFAdjacency();
+	tri::UpdateTopology<CMeshO>::FaceFace(mm.cm);
+	// store valence for each vertex
+	CMeshO::PerVertexAttributeHandle<int> val;
+	if (tri::HasPerVertexAttribute(mm.cm, "Valence")) {
+		val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(mm.cm, "Valence");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<int>(mm.cm, val)) {
+			throw MLException("attribute already exists with a different type");
+		}
+	}
+	else
+		val = tri::Allocator<CMeshO>::AddPerVertexAttribute<int>(mm.cm, "Valence");
+
+	for (auto vi = mm.cm.vert.begin(); vi != mm.cm.vert.end(); vi++) {
+		if (!vi->IsD()) {
+			val[vi] = 0;
+		}
+	}
+
+	for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+		if (!fi->IsD()) {
+			val[fi->V(0)] += 1;
+			val[fi->V(1)] += 1;
+			val[fi->V(2)] += 1;
+		}
+	}
+}
+
 void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 {
 	if (!initflag) {
-		mm.cm.face.EnableFFAdjacency();
-		tri::UpdateTopology<CMeshO>::FaceFace(mm.cm);
-		// store valence for each vertex
 		CMeshO::PerVertexAttributeHandle<int> val;
 		if (tri::HasPerVertexAttribute(mm.cm, "Valence")) {
-			val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(
-				mm.cm, "Valence");
+			val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(mm.cm, "Valence");
 			if (!tri::Allocator<CMeshO>::IsValidHandle<int>(mm.cm, val)) {
 				throw MLException("attribute already exists with a different type");
-			}
-		}
-		else
-			val = tri::Allocator<CMeshO>::AddPerVertexAttribute<int>(
-				mm.cm, "Valence");
-
-		for (auto vi = mm.cm.vert.begin(); vi != mm.cm.vert.end(); vi++) {
-			if (!vi->IsD()) {
-				val[vi] = 0;
 			}
 		}
 
@@ -567,7 +588,7 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 					 ringNp[id(-3, ringNp.size())]})
 					.array() = tempedge;
 
-				// vert 10
+				// vert 10dev
 				matPatchSubdiv[fi][3](
 					9,
 					{fi->V2(1)->Index(),
@@ -669,11 +690,28 @@ void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOption
 			}
 		}
 
-		// foot points should be solved now
-		CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptr;
-		CMeshO::PerVertexAttributeHandle<Point3f>       ftbarycoord;
-		for (auto vi = spl.cm.face.begin(); vi != spl.cm.face.end(); vi++) {
+	CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptrs;
+		if (tri::HasPerVertexAttribute(spl.cm, "FootTriangle")) {
+			ftptrs = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(
+				spl.cm, "FootTriangle");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<const CFaceO*>(spl.cm, ftptrs)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
 
+			CMeshO::PerVertexAttributeHandle<Point3f> ftbarycoords;
+		if (tri::HasPerVertexAttribute(spl.cm, "BaryCoord")) {
+			ftbarycoords =
+				tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<Point3f>(spl.cm, ftbarycoords)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
+
+		// foot points should be solved now
+		for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
+			Eigen::VectorXd densestencil = weightsPatch(ftptrs[vi], ftbarycoords[vi][1], ftbarycoords[vi][2]);
+			//std::cout << densestencil.transpose() << std::endl;
 		}
 	} break;
 	case FilterSubdivFittingPlugin::MODE_UPDATE: break;
@@ -691,17 +729,46 @@ FilterSubdivFittingPlugin::evaluateLimitPoint(const CFaceO* ft, const vcg::Point
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float v, float w)
 {
 	// return dimension of 1*NV weight vector of all control points
+	// per vertex valence and per triangle subpatch pick up mat should be update
 
-	for (int i = 0; i < 3; i++) {
-		const CVertexO* v = ft->V(i);
+	// TODO: wrong check!
+	CMeshO::PerVertexAttributeHandle<int> val;
+	if (tri::HasPerVertexAttribute(ptctrlmesh->cm, "Valence")) {
+		val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(ptctrlmesh->cm, "Valence");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<int>(ptctrlmesh->cm, val)) {
+			throw MLException("attribute already exists with a different type");
+		}
 	}
 
-	auto b = weightsIrregularPatch(9, v, w);
-	weightsIrregularPatch(10, v, w);
-	weightsIrregularPatch(11, v, w);
+	CMeshO::PerFaceAttributeHandle<std::vector<Eigen::MatrixXd>> matPatchSubdiv;
+	if (tri::HasPerFaceAttribute(ptctrlmesh->cm, "PatchSubdiv")) {
+		matPatchSubdiv = tri::Allocator<CMeshO>::FindPerFaceAttribute<std::vector<Eigen::MatrixXd>>(
+			ptctrlmesh->cm, "PatchSubdiv");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<std::vector<Eigen::MatrixXd>>(
+				ptctrlmesh->cm, matPatchSubdiv)) {
+			throw MLException("attribute already exists with a different type");
+		}
+	}
 
-
-	return b;
+	if (v < 0.5 && v < 0.5 - w) {
+		// patch correspond to vert 0
+		return weightsIrregularPatch(val[ft->V(0)], 2 * v, 2 * w).transpose() *
+			   matPatchSubdiv[ft][0];
+	}
+	else if (v > 0.5) {
+		// patch correspond to vert 1
+		return weightsIrregularPatch(val[ft->V(1)], 2 * w, 2 * (1 - v - w)).transpose() *
+			   matPatchSubdiv[ft][1];
+	}
+	else if (w > 0.5) {
+		// patch correspond to vert 2
+		return weightsIrregularPatch(val[ft->V(2)], 2 * (1 - v - w), 2 * v).transpose() *
+			   matPatchSubdiv[ft][2];
+	}
+	else {
+		// patch correspond to vert 3
+		return weightsIrregularPatch(6, 1 - 2 * v, 1 - 2 * w).transpose() * matPatchSubdiv[ft][3];
+	}
 }
 
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v, float w)

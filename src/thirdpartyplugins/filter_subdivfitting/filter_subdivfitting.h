@@ -77,8 +77,9 @@ public:
 private:
 	// Implement following https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/loop.pdf
 	void solveFootPoints(MeshModel& spl, const MeshModel& ctrlm, int mode);
-	void solvePickupVec(MeshModel& mm);
-	std::pair<float,vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
+	std::pair<float, vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
+	void                           updatePerVertexValence(MeshModel& mm);
+	void                           solvePickupVec(MeshModel& mm);
 	void                           updateLimitStencils(MeshModel& spl, UpdateOptions mode);
 	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
 	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
@@ -94,6 +95,8 @@ private:
 	std::map<int, Eigen::MatrixXd> cacheV;
 	std::map<int, Eigen::MatrixXd> cacheVinv;
 	std::map<int, Eigen::MatrixXd> cacheAbarApow;
+	MeshModel*                     ptsample   = nullptr;
+	MeshModel*                     ptctrlmesh = nullptr;
 };
 
 #endif //MESHLAB_FILTER_SUBDIVFITTING_PLUGIN_H
