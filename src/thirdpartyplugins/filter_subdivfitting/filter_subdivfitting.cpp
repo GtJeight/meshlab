@@ -210,13 +210,25 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 			&md,
 			"Control mesh",
 			"Control mesh for subdivision"));
-		}
-		parlst.addParam(RichInt(
-			"testfaceid",
-			0,
-			"Test Face",
+		parlst.addParam(RichBool(
+			"no_fitting",
+			false,
+			"Push to Limit Position only",
 			" "
 			" "));
+		parlst.addParam(RichBool(
+			"show_new_mesh",
+			false,
+			"Show New Control Mesh",
+			" "
+			" "));
+		parlst.addParam(RichBool(
+			"show_limit_samples",
+			false,
+			"Show Limit Samples",
+			" "
+			" "));
+		}
 		break;
 	default :
 		assert(0);
@@ -244,6 +256,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		MeshModel* curMM = md.mm();
 		CMeshO&    m     = curMM->cm;
 
+		mdptr      = &md;
 		ptsample   = md.getMesh(par.getMeshId("samples"));
 		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
 
@@ -256,7 +269,9 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 			updateLimitStencils(*ptsample, UpdateOptions::MODE_INIT);
 
-			assembleFittingQuery();
+			assembleFittingQuery(par);
+
+			displayResults(par);
 		}
 		else
 			log("already initialized!");
@@ -368,10 +383,6 @@ void FilterSubdivFittingPlugin::solveFootPoints(
 
 			ftptrs[si] = footface;
 			ftbarycoords[si] = minpair.second;
-		}
-
-		for (auto si = spl.cm.vert.begin(); si != spl.cm.vert.end(); si++) {
-			auto p = evaluateLimitPoint(ftptrs[si], ftbarycoords[si]);
 		}
 	} break;
 	default: break;
@@ -725,7 +736,7 @@ void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOption
 	}
 }
 
-void FilterSubdivFittingPlugin::assembleFittingQuery()
+void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& par)
 {
 	splpts = Eigen::MatrixXd::Zero(ptsample->cm.VN(), 3);
 	projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
@@ -750,17 +761,99 @@ void FilterSubdivFittingPlugin::assembleFittingQuery()
 		projectedsplpts += ls[si] * splpts(si, Eigen::placeholders::all);
 	}
 
-	ATA = AT * AT.transpose();
+	bool no_fitting = par.getBool("no_fitting");
 
-	solver.compute(ATA);
-	solution = solver.solve(projectedsplpts);
+	if (no_fitting) {
+		controlmesh.resize(ptctrlmesh->cm.vert.size(), 3);
+		for (int vi = 0; vi != ptctrlmesh->cm.vert.size(); vi++) {
+			controlmesh(vi, Eigen::placeholders::all) << ptctrlmesh->cm.vert[vi].P()[0],
+				ptctrlmesh->cm.vert[vi].P()[1], ptctrlmesh->cm.vert[vi].P()[2];
+		}
+	}
+	else {
+		ATA = AT * AT.transpose();
+
+		solver.compute(ATA);
+		controlmesh = solver.solve(projectedsplpts);
+	}
+
 }
 
 Point3f
-FilterSubdivFittingPlugin::evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord)
+FilterSubdivFittingPlugin::evaluateLimitPoint(int vi)
 {
-	auto b = weightsPatch(ft, barycoord[1], barycoord[2]);
-	return Point3f(0.f, 0.f, 0.f);
+	CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls;
+	if (tri::HasPerVertexAttribute(ptsample->cm, "LimitStencil")) {
+		ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+			ptsample->cm, "LimitStencil");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<Eigen::SparseVector<double>>(ptsample->cm, ls)) {
+			throw MLException("attribute already exists with a different type");
+		}
+	}
+
+	auto fitting_sample = ls[vi].transpose() * controlmesh;
+
+	return Point3f(fitting_sample(0), fitting_sample(1), fitting_sample(2));
+}
+
+void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
+{
+	bool show_ctrlmesh  = par.getBool("show_new_mesh");
+	bool show_limitspls = par.getBool("show_limit_samples");
+
+	if (show_ctrlmesh) {
+		MeshModel* sourceCtrlMesh = ptctrlmesh; // source = current
+		QString    newName        = sourceCtrlMesh->label() + "_fitting";
+		MeshModel* destModel    = mdptr->addNewMesh(
+            "",
+            newName,
+            true); // After Adding a mesh to a MeshDocument the new mesh is the current one
+		destModel->updateDataMask(sourceCtrlMesh);
+		tri::Append<CMeshO, CMeshO>::Mesh(destModel->cm, sourceCtrlMesh->cm);
+
+		for (const std::string& tex : destModel->cm.textures) {
+			destModel->addTexture(tex, sourceCtrlMesh->getTexture(tex));
+		}
+
+		log("Create control mesh solution %i", destModel->id());
+
+		// init new layer
+		destModel->updateBoxAndNormals();
+		destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
+
+		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
+			destModel->cm.vert[vi].P()[0] = controlmesh(vi, 0);
+			destModel->cm.vert[vi].P()[1] = controlmesh(vi, 1);
+			destModel->cm.vert[vi].P()[2] = controlmesh(vi, 2);
+		}
+	}
+
+	if (show_limitspls) {
+		MeshModel* sourceCtrlMesh = ptsample; // source = current
+		QString    newName        = sourceCtrlMesh->label() + "_fitting";
+		MeshModel* destModel      = mdptr->addNewMesh(
+            "",
+            newName,
+            true); // After Adding a mesh to a MeshDocument the new mesh is the current one
+		destModel->updateDataMask(sourceCtrlMesh);
+		tri::Append<CMeshO, CMeshO>::Mesh(destModel->cm, sourceCtrlMesh->cm);
+
+		for (const std::string& tex : destModel->cm.textures) {
+			destModel->addTexture(tex, sourceCtrlMesh->getTexture(tex));
+		}
+
+		log("Create fitting samples %i", destModel->id());
+
+		// init new layer
+		destModel->updateBoxAndNormals();
+		destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
+
+
+
+		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
+			destModel->cm.vert[vi].P() = evaluateLimitPoint(vi);
+		}
+	}
 }
 
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float v, float w)

@@ -82,9 +82,10 @@ private:
 	void                           updatePerVertexValence(MeshModel& mm);
 	void                           solvePickupVec(MeshModel& mm);
 	void                           updateLimitStencils(MeshModel& spl, UpdateOptions mode);
-	void                           assembleFittingQuery();
-	vcg::Point3f    evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
-	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
+	void                           assembleFittingQuery(const RichParameterList& par);
+	vcg::Point3f                   evaluateLimitPoint(int vi);
+	void                           displayResults(const RichParameterList& par);
+	Eigen::VectorXd                weightsPatch(const CFaceO* ft, float v, float w);
 	Eigen::VectorXd                weightsIrregularPatch(int V, float v, float w);
 	Eigen::RowVectorXd             weightsRegularPatch(float u, float v, float w);
 	Eigen::MatrixXd                matrixPickup(int N, int k);
@@ -97,11 +98,12 @@ private:
 	std::map<int, Eigen::MatrixXd> cacheV;
 	std::map<int, Eigen::MatrixXd> cacheVinv;
 	std::map<int, Eigen::MatrixXd> cacheAbarApow;
+	MeshDocument*                  mdptr       = nullptr;
 	MeshModel*                     ptsample   = nullptr;
 	MeshModel*                     ptctrlmesh = nullptr;
 	Eigen::MatrixXd                splpts;
 	Eigen::MatrixXd                projectedsplpts;
-	Eigen::MatrixXd                solution;
+	Eigen::MatrixXd                controlmesh;
 	Eigen::SparseMatrix<double>    AT;
 	Eigen::SparseMatrix<double>    ATA;
 	Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
