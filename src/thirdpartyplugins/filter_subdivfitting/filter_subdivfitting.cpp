@@ -25,6 +25,8 @@
 
 using namespace vcg;
 
+#define MATEPS 1e-10
+
 
 static int id(int i, int N)
 {
@@ -253,6 +255,8 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			solveFootPoints(*ptsample, *ptctrlmesh, FootPointMode::MODE_MESH);
 
 			updateLimitStencils(*ptsample, UpdateOptions::MODE_INIT);
+
+			assembleFittingQuery();
 		}
 		else
 			log("already initialized!");
@@ -684,11 +688,13 @@ void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOption
 		if (tri::HasPerVertexAttribute(spl.cm, "LimitStencil")) {
 			ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
 				spl.cm, "LimitStencil");
-			if (!tri::Allocator<CMeshO>::IsValidHandle<Eigen::SparseVector<double>>(
-					spl.cm, ls)) {
+			if (!tri::Allocator<CMeshO>::IsValidHandle<Eigen::SparseVector<double>>(spl.cm, ls)) {
 				throw MLException("attribute already exists with a different type");
 			}
 		}
+		else
+			ls = tri::Allocator<CMeshO>::AddPerVertexAttribute<Eigen::SparseVector<double>>(
+				spl.cm, "LimitStencil");
 
 	CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptrs;
 		if (tri::HasPerVertexAttribute(spl.cm, "FootTriangle")) {
@@ -711,12 +717,43 @@ void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOption
 		// foot points should be solved now
 		for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
 			Eigen::VectorXd densestencil = weightsPatch(ftptrs[vi], ftbarycoords[vi][1], ftbarycoords[vi][2]);
-			//std::cout << densestencil.transpose() << std::endl;
+			ls[vi] = densestencil.sparseView(1., MATEPS);
 		}
 	} break;
 	case FilterSubdivFittingPlugin::MODE_UPDATE: break;
 	default: break;
 	}
+}
+
+void FilterSubdivFittingPlugin::assembleFittingQuery()
+{
+	splpts = Eigen::MatrixXd::Zero(ptsample->cm.VN(), 3);
+	projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
+
+	for (int si = 0; si != ptsample->cm.vert.size(); si++) {
+		splpts(si, Eigen::placeholders::all) << ptsample->cm.vert[si].P()[0],
+			ptsample->cm.vert[si].P()[1], ptsample->cm.vert[si].P()[2];
+	}
+
+	CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls;
+	if (tri::HasPerVertexAttribute(ptsample->cm, "LimitStencil")) {
+		ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+			ptsample->cm, "LimitStencil");
+		if (!tri::Allocator<CMeshO>::IsValidHandle<Eigen::SparseVector<double>>(ptsample->cm, ls)) {
+			throw MLException("attribute already exists with a different type");
+		}
+	}
+
+	AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
+	for (int si = 0; si != ptsample->cm.vert.size(); si++) {
+		AT.col(si) = ls[si];
+		projectedsplpts += ls[si] * splpts(si, Eigen::placeholders::all);
+	}
+
+	ATA = AT * AT.transpose();
+
+	solver.compute(ATA);
+	solution = solver.solve(projectedsplpts);
 }
 
 Point3f

@@ -27,6 +27,7 @@
 // from meshlab common, include the abstract class file of filter plugins
 #include <common/plugins/interfaces/filter_plugin.h>
 #include <Eigen/Sparse>
+#include <Eigen/SparseCholesky>	
 
 /**
  * @brief The FilterSubdivFittingPlugin class
@@ -81,7 +82,8 @@ private:
 	void                           updatePerVertexValence(MeshModel& mm);
 	void                           solvePickupVec(MeshModel& mm);
 	void                           updateLimitStencils(MeshModel& spl, UpdateOptions mode);
-	vcg::Point3f evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
+	void                           assembleFittingQuery();
+	vcg::Point3f    evaluateLimitPoint(const CFaceO* ft, const vcg::Point3f& barycoord);
 	Eigen::VectorXd weightsPatch(const CFaceO* ft, float v, float w);
 	Eigen::VectorXd                weightsIrregularPatch(int V, float v, float w);
 	Eigen::RowVectorXd             weightsRegularPatch(float u, float v, float w);
@@ -97,6 +99,12 @@ private:
 	std::map<int, Eigen::MatrixXd> cacheAbarApow;
 	MeshModel*                     ptsample   = nullptr;
 	MeshModel*                     ptctrlmesh = nullptr;
+	Eigen::MatrixXd                splpts;
+	Eigen::MatrixXd                projectedsplpts;
+	Eigen::MatrixXd                solution;
+	Eigen::SparseMatrix<double>    AT;
+	Eigen::SparseMatrix<double>    ATA;
+	Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
 };
 
 #endif //MESHLAB_FILTER_SUBDIVFITTING_PLUGIN_H
