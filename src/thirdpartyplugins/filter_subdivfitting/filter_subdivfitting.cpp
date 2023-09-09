@@ -228,6 +228,12 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 			"Show Limit Samples",
 			" "
 			" "));
+		parlst.addParam(RichBool(
+			"check_bary_coord",
+			false,
+			"Check Barycenter",
+			" "
+			" "));
 		}
 		break;
 	default :
@@ -459,7 +465,7 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 			}
 		}
 
-		
+		Eigen::Array4d tempedge({0.375, 0.375, 0.125, 0.125});
 		for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
 			if (!(*fi).IsD()) {
 				CFaceO*          startfp = &*fi;
@@ -514,20 +520,29 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 					int N                                    = val[vid];
 					matPatchSubdiv[fi][vi](0, vid)           = 1 - alpha(N);
 					matPatchSubdiv[fi][vi](0, ring1).array() = alpha(N) / N;
-					for (int i = 0; i < val[vid]; i++) {
-						matPatchSubdiv[fi][vi](i, vid)                     = 0.375;
-						matPatchSubdiv[fi][vi](i, ring1[i])                = 0.375;
-						matPatchSubdiv[fi][vi](1 + id(i - 2, N), ring1[i]) = 0.125;
-						matPatchSubdiv[fi][vi](1 + id(i, N), ring1[i])     = 0.125;
+					for (int i = 0; i < N; i++) {
+						matPatchSubdiv[fi][vi](
+							1 + id(i - 1, N),
+							{vid, ring1[i], ring1[id(i - 1, N)], ring1[id(i + 1, N)]})
+							.array() = tempedge;
 					}
-					matPatchSubdiv[fi][vi]({N + 1, N + 3}, next).array() = 0.375;
-					matPatchSubdiv[fi][vi]({N + 1, N + 5}, prev).array() = 0.375;
+					matPatchSubdiv[fi][vi](N + 1, {ring1[0], ring1[id(-1, N)]}).array() = 0.375;
+					matPatchSubdiv[fi][vi](N + 1, {vid, ring2[2]}).array()              = 0.125;
+					matPatchSubdiv[fi][vi](N + 3, {ring1[0], ring1[1]}).array()         = 0.375;
+					matPatchSubdiv[fi][vi](N + 3, {vid, ring2[id(-2, val[next])]}).array() = 0.125;
+					matPatchSubdiv[fi][vi](N + 5, {ring1[id(-1, N)], ring1[id(-2, N)]}).array() =
+						0.375;
+					matPatchSubdiv[fi][vi](N + 5, {vid, ringNp[2]}).array() = 0.125;
 
 					matPatchSubdiv[fi][vi](N + 2, next)           = 1 - alpha(val[next]);
 					matPatchSubdiv[fi][vi](N + 2, ring2).array()  = alpha(val[next]) / val[next];
 					matPatchSubdiv[fi][vi](N + 4, prev)           = 1 - alpha(val[prev]);
-					matPatchSubdiv[fi][vi](N + 4, ringNp).array() = alpha(val[next]) / val[next];
+					matPatchSubdiv[fi][vi](N + 4, ringNp).array() = alpha(val[prev]) / val[prev];
 				}
+				std::cout << "face: " << fi->Index() << " vert0: " << fi->V(0)->Index() << std::endl
+						  << matPatchSubdiv[fi][0] << std::endl
+						  << std::endl;
+
 
 				////test
 				//std::cout << "face: " << fi->Index()<<std::endl;
@@ -544,7 +559,6 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 				//std::cout << std::endl << std::endl;
 
 				// construct regular patch subdiv mat
-				Eigen::Array4d tempedge({0.375, 0.375, 0.125, 0.125});
 
 				// vert 1
 				matPatchSubdiv[fi][3](
@@ -707,7 +721,7 @@ void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOption
 			ls = tri::Allocator<CMeshO>::AddPerVertexAttribute<Eigen::SparseVector<double>>(
 				spl.cm, "LimitStencil");
 
-	CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptrs;
+		CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptrs;
 		if (tri::HasPerVertexAttribute(spl.cm, "FootTriangle")) {
 			ftptrs = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(
 				spl.cm, "FootTriangle");
@@ -716,7 +730,7 @@ void FilterSubdivFittingPlugin::updateLimitStencils(MeshModel& spl, UpdateOption
 			}
 		}
 
-			CMeshO::PerVertexAttributeHandle<Point3f> ftbarycoords;
+		CMeshO::PerVertexAttributeHandle<Point3f> ftbarycoords;
 		if (tri::HasPerVertexAttribute(spl.cm, "BaryCoord")) {
 			ftbarycoords =
 				tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
@@ -800,6 +814,7 @@ void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
 {
 	bool show_ctrlmesh  = par.getBool("show_new_mesh");
 	bool show_limitspls = par.getBool("show_limit_samples");
+	bool check_bary_coord = par.getBool("check_bary_coord");
 
 	if (show_ctrlmesh) {
 		MeshModel* sourceCtrlMesh = ptctrlmesh; // source = current
@@ -848,10 +863,53 @@ void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
 		destModel->updateBoxAndNormals();
 		destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
 
-
-
 		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
 			destModel->cm.vert[vi].P() = evaluateLimitPoint(vi);
+		}
+	}
+
+	if (check_bary_coord) {
+		MeshModel* sourceCtrlMesh = ptsample; // source = current
+		QString    newName        = sourceCtrlMesh->label() + "_barycoord";
+		MeshModel* destModel      = mdptr->addNewMesh(
+            "",
+            newName,
+            true); // After Adding a mesh to a MeshDocument the new mesh is the current one
+		destModel->updateDataMask(sourceCtrlMesh);
+		tri::Append<CMeshO, CMeshO>::Mesh(destModel->cm, sourceCtrlMesh->cm);
+
+		for (const std::string& tex : destModel->cm.textures) {
+			destModel->addTexture(tex, sourceCtrlMesh->getTexture(tex));
+		}
+
+		log("Create fitting samples %i", destModel->id());
+
+		// init new layer
+		destModel->updateBoxAndNormals();
+		destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
+
+		CMeshO::PerVertexAttributeHandle<const CFaceO*> ftptrs;
+		if (tri::HasPerVertexAttribute(ptsample->cm, "FootTriangle")) {
+			ftptrs = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(
+				ptsample->cm, "FootTriangle");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<const CFaceO*>(ptsample->cm, ftptrs)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
+
+		CMeshO::PerVertexAttributeHandle<Point3f> ftbarycoords;
+		if (tri::HasPerVertexAttribute(ptsample->cm, "BaryCoord")) {
+			ftbarycoords =
+				tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(ptsample->cm, "BaryCoord");
+			if (!tri::Allocator<CMeshO>::IsValidHandle<Point3f>(ptsample->cm, ftbarycoords)) {
+				throw MLException("attribute already exists with a different type");
+			}
+		}
+
+		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
+			destModel->cm.vert[vi].P() = ftbarycoords[vi][0] * ftptrs[vi]->V(0)->P() +
+										 ftbarycoords[vi][1] * ftptrs[vi]->V(1)->P() +
+										 ftbarycoords[vi][2] * ftptrs[vi]->V(2)->P();
 		}
 	}
 }
@@ -880,7 +938,7 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float 
 		}
 	}
 
-	if (v < 0.5 && v < 0.5 - w) {
+	if (v < 0.5 && w < 0.5 - v) {
 		// patch correspond to vert 0
 		return weightsIrregularPatch(val[ft->V(0)], 2 * v, 2 * w).transpose() *
 			   matPatchSubdiv[ft][0];
@@ -904,14 +962,16 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsPatch(const CFaceO* ft, float 
 Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v, float w)
 {
 	// return dimension of 1*(N+6) weight vector of control points in 1-ring of irregular patch
-	if (N == 6)
-		return weightsRegularPatch(1.f - v - w, v, w);
+	if (N == 6) {
+		return weightsRegularPatch(1.f - v - w, v, w) * matrixPickup(N, 3);
+	}
 
 	if (v + w < eps) {
 		// TODO: validate this formula
 		double          alphaN = alpha(N);
-		Eigen::VectorXd b = Eigen::VectorXd::Constant(N + 6, (8. / 3. * alphaN) / (1. + 8. / 3. * alphaN) / N);
-		b(3) = 1. / (1. + 8. / 3. * alphaN);
+		Eigen::VectorXd b      = Eigen::VectorXd::Zero(N + 6);
+		b.array()              = (8. / 3. * alphaN) / (1. + 8. / 3. * alphaN) / N;
+		b(0) = 1. / (1. + 8. / 3. * alphaN);
 		return b;
 	}
 	else {
@@ -968,13 +1028,14 @@ Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float
 		2 * u * pow(w, 3) + pow(w, 4) + 6 * u * v * w * w + 6 * v * pow(w, 3) + 6 * u * v * v * w +
 			12 * v * v * w * w + 2 * u * pow(v, 3) + 6 * pow(v, 3) * w + pow(v, 4),
 		pow(w, 4) + 2 * v * pow(w, 3);
+	b /= 12.;
 	return b;
 }
 
 Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 {
 	assert(N >= 3);
-	auto cP = cacheP.find(intPairHash(N, k));
+	auto cP = cacheP.find(4 * k + N);
 	if (cP != cacheP.end())
 		return cP->second;
 
@@ -998,6 +1059,14 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
 	} break;
 
+	case 3: {
+		std::vector<int> idx {3, 4, 2, 0, 5, 9, 1, 6, 11, 8, 7, 10};
+		cacheP[intPairHash(N, k)] = Eigen::MatrixXd::Zero(12, 12);
+		cacheP[intPairHash(N, k)](Eigen::placeholders::all, idx) =
+			Eigen::MatrixXd::Identity(12, 12);
+		return cacheP[intPairHash(N, k)];
+	} break;
+
 	default: break;
 	}
 	cacheP[intPairHash(N, k)] = P;
@@ -1007,6 +1076,7 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 
 Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPatchSubdiv(int N, int n)
 {
+	// return dimension of (N+12)*(N+6) subdiv matrix irregular patch
 	assert(N >= 3 && n >= 1);
 	auto cabap = cacheAbarApow.find(intPairHash(N, n));
 	if (cabap != cacheAbarApow.end())
