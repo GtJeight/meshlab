@@ -51,7 +51,7 @@ class FilterSubdivFittingPlugin : public QObject, public FilterPlugin
 
 public:
 	//enum used to give an ID to every filter implemented in the plugin
-	enum FileterIds {FP_SUBDIV_FITTING};
+	enum FileterIds { FP_SUBDIV_FITTING = 0, FP_REANALYSIS_CA = 1 };
 	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
 	enum UpdateOptions { MODE_INIT = 0, MODE_UPDATE = 1 };
 
@@ -77,11 +77,13 @@ public:
 
 private:
 	// Implement following https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/loop.pdf
-	void solveFootPoints(MeshModel& spl, const MeshModel& ctrlm, int mode);
+	void                           assignPerElementAtributes();
+	void                           parameterizeSamples(FootPointMode mode);
+	void                           solveFootPoint(CVertexO* v,FootPointMode mode);
 	std::pair<float, vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
-	void                           updatePerVertexValence(MeshModel& mm);
-	void                           solvePickupVec(MeshModel& mm);
-	void                           updateLimitStencils(MeshModel& spl, UpdateOptions mode);
+	void                           updatePerVertexValence();
+	void                           solvePickupVec();
+	void                           updateLimitStencils(UpdateOptions mode);
 	void                           assembleFittingQuery(const RichParameterList& par);
 	vcg::Point3f                   evaluateLimitPoint(int vi);
 	void                           displayResults(const RichParameterList& par);
@@ -90,6 +92,9 @@ private:
 	Eigen::RowVectorXd             weightsRegularPatch(float u, float v, float w);
 	Eigen::MatrixXd                matrixPickup(int N, int k);
 	Eigen::MatrixXd                matrixPatchSubdiv(int N, int n);
+
+	void testFVOutput(MeshModel& mm);
+
 	float                          eps       = 1.f / 64.f;
 	bool                           initflag  = false;
 	bool                           solveflag = false;
