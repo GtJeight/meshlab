@@ -538,9 +538,9 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 					matPatchSubdiv[fi][vi](N + 4, prev)           = 1 - alpha(val[prev]);
 					matPatchSubdiv[fi][vi](N + 4, ringNp).array() = alpha(val[prev]) / val[prev];
 				}
-				std::cout << "face: " << fi->Index() << " vert0: " << fi->V(0)->Index() << std::endl
-						  << matPatchSubdiv[fi][0] << std::endl
-						  << std::endl;
+				//std::cout << "face: " << fi->Index() << " vert0: " << fi->V(0)->Index() << std::endl
+				//		  << matPatchSubdiv[fi][0] << std::endl
+				//		  << std::endl;
 
 
 				////test
@@ -1038,7 +1038,7 @@ Eigen::RowVectorXd FilterSubdivFittingPlugin::weightsRegularPatch(float u, float
 Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 {
 	assert(N >= 3);
-	auto cP = cacheP.find(4 * k + N);
+	auto cP = cacheP.find(4 * N + k);
 	if (cP != cacheP.end())
 		return cP->second;
 
@@ -1064,7 +1064,7 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 
 	default: break;
 	}
-	cacheP[intPairHash(N, k)] = P;
+	cacheP[4 * N + k] = P;
 	return P;
 
 }
