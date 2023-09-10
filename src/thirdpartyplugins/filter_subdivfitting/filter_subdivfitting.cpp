@@ -522,8 +522,7 @@ void FilterSubdivFittingPlugin::solvePickupVec(MeshModel& mm)
 					matPatchSubdiv[fi][vi](0, ring1).array() = alpha(N) / N;
 					for (int i = 0; i < N; i++) {
 						matPatchSubdiv[fi][vi](
-							1 + id(i - 1, N),
-							{vid, ring1[i], ring1[id(i - 1, N)], ring1[id(i + 1, N)]})
+							i + 1, {vid, ring1[i], ring1[id(i - 1, N)], ring1[id(i + 1, N)]})
 							.array() = tempedge;
 					}
 					matPatchSubdiv[fi][vi](N + 1, {ring1[0], ring1[id(-1, N)]}).array() = 0.375;
@@ -963,15 +962,19 @@ Eigen::VectorXd FilterSubdivFittingPlugin::weightsIrregularPatch(int N, float v,
 {
 	// return dimension of 1*(N+6) weight vector of control points in 1-ring of irregular patch
 	if (N == 6) {
-		return weightsRegularPatch(1.f - v - w, v, w) * matrixPickup(N, 3);
+		return weightsRegularPatch(1.f - v - w, v, w);
 	}
 
 	if (v + w < eps) {
 		// TODO: validate this formula
-		double          alphaN = alpha(N);
-		Eigen::VectorXd b      = Eigen::VectorXd::Zero(N + 6);
-		b.array()              = (8. / 3. * alphaN) / (1. + 8. / 3. * alphaN) / N;
-		b(0) = 1. / (1. + 8. / 3. * alphaN);
+		double          alphaN_ = 3. / (11. - 8 * (0.375 + pow(0.375 + 0.25 * cos(2 * M_PI / N),
+                                                      2))); // different from previous alphaN
+		Eigen::VectorXd b       = Eigen::VectorXd::Zero(N + 6);
+		b(Eigen::seq(0, N)).array() = (1 - alphaN_) / N;
+		if (N == 6)
+			b(3) = alphaN_;
+		else
+			b(0) = alphaN_;
 		return b;
 	}
 	else {
@@ -1057,14 +1060,6 @@ Eigen::MatrixXd FilterSubdivFittingPlugin::matrixPickup(int N, int k)
 		std::vector<int> idx {
 			0, N - 1, 1, N, N + 5, N + 2, N + 1, N + 4, N + 11, N + 6, N + 9, N + 10};
 		P(Eigen::placeholders::all, idx) = Eigen::MatrixXd::Identity(12, 12);
-	} break;
-
-	case 3: {
-		std::vector<int> idx {3, 4, 2, 0, 5, 9, 1, 6, 11, 8, 7, 10};
-		cacheP[intPairHash(N, k)] = Eigen::MatrixXd::Zero(12, 12);
-		cacheP[intPairHash(N, k)](Eigen::placeholders::all, idx) =
-			Eigen::MatrixXd::Identity(12, 12);
-		return cacheP[intPairHash(N, k)];
 	} break;
 
 	default: break;
