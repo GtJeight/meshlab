@@ -81,9 +81,10 @@ private:
 	void                           parameterizeSamples(FootPointMode mode);
 	void                           solveFootPoint(CVertexO* v,FootPointMode mode);
 	std::pair<float, vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);
-	void                           updatePerVertexValence();
+	void                           updateControlVertexAttribute();
 	void                           solvePickupVec();
 	void                           updateLimitStencils(UpdateOptions mode);
+	void                           updateVertexComplete(MeshModel* mm);
 	void                           assembleFittingQuery(const RichParameterList& par);
 	vcg::Point3f                   evaluateLimitPoint(int vi);
 	void                           displayResults(const RichParameterList& par);
@@ -95,22 +96,24 @@ private:
 
 	void testFVOutput(MeshModel& mm);
 
-	float                          eps       = 1.f / 64.f;
-	bool                           initflag  = false;
-	bool                           solveflag = false;
-	std::map<int, Eigen::MatrixXd> cacheP;
-	std::map<int, Eigen::MatrixXd> cacheAbar;
-	std::map<int, Eigen::MatrixXd> cacheV;
-	std::map<int, Eigen::MatrixXd> cacheVinv;
-	std::map<int, Eigen::MatrixXd> cacheAbarApow;
-	MeshDocument*                  mdptr       = nullptr;
-	MeshModel*                     ptsample   = nullptr;
-	MeshModel*                     ptctrlmesh = nullptr;
-	Eigen::MatrixXd                splpts;
-	Eigen::MatrixXd                projectedsplpts;
-	Eigen::MatrixXd                controlmesh;
-	Eigen::SparseMatrix<double>    AT;
-	Eigen::SparseMatrix<double>    ATA;
+	float                                              eps        = 1.f / 64.f;
+	bool                                               initflag   = false;
+	bool                                               topochange = true;
+	bool                                               sampleupdate = true;
+	bool                                               solveflag  = false;
+	std::map<int, Eigen::MatrixXd>                     cacheP;
+	std::map<int, Eigen::MatrixXd>                     cacheAbar;
+	std::map<int, Eigen::MatrixXd>                     cacheV;
+	std::map<int, Eigen::MatrixXd>                     cacheVinv;
+	std::map<int, Eigen::MatrixXd>                     cacheAbarApow;
+	MeshDocument*                                      mdptr       = nullptr;
+	MeshModel*                                         ptsample   = nullptr;
+	MeshModel*                                         ptctrlmesh  = nullptr;
+	Eigen::MatrixXd                                    splpts;
+	Eigen::MatrixXd                                    projectedsplpts;
+	Eigen::MatrixXd                                    controlmesh;
+	Eigen::SparseMatrix<double>                        AT;
+	Eigen::SparseMatrix<double>                        ATA;
 	Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
 };
 
