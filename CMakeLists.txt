@@ -4,6 +4,12 @@
 
 cmake_minimum_required(VERSION 3.18)
 project(MeshLab)
+### Dev Settings
+IF(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  SET(CMAKE_INSTALL_PREFIX D:/application/MeshLab CACHE PATH comms FORCE)
+ENDIF(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+set(Qt5_DIR D:/libraries/Qt/5.15.2/msvc2019_64/lib/cmake/Qt5)
+set(EIGEN3_INCLUDE_DIR D:/libraries/Eigen3/include/eigen3)
 
 ### Build options
 option(MESHLAB_BUILD_MINI "Build only common and meshlab - other plugin targets must be set manually" OFF)
@@ -15,8 +21,5 @@ option(MESHLAB_BUILD_ONLY_LIBRARIES "Build only meshlab-common and plugins, excl
 option(MESHLAB_USE_DEFAULT_BUILD_AND_INSTALL_DIRS "If set to OFF, it expects that you set manually the binary and install directories" ON)
 
 option(MESHLAB_IS_NIGHTLY_VERSION "Nightly version of meshlab will be used instead of ML_VERSION" OFF)
-
-### Dev Settings
-set(EIGEN3_INCLUDE_DIR G:/libraries/Eigen3/include/eigen3)
 
 add_subdirectory(src)
