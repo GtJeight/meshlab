@@ -92,6 +92,7 @@ QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 	switch(filterId) {
 	case FP_SUBDIV_FITTING :
 		return "Subdivision Surface Fitting";
+	case FP_FITTING_ERROR: return "Fitting Distance Error";
 	default :
 		assert(0);
 		return "";
@@ -128,6 +129,7 @@ FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const
 	switch(ID(a)) {
 	case FP_SUBDIV_FITTING :
 	case FP_REANALYSIS_CA:
+	case FP_FITTING_ERROR:
 		return FilterPlugin::Other;
 	default :
 		assert(0);
@@ -154,6 +156,7 @@ int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
 	case FP_SUBDIV_FITTING:
 	case FP_REANALYSIS_CA:
 		return MeshModel::MM_FACEFACETOPO | MeshModel::MM_VERTFACETOPO;
+	case FP_FITTING_ERROR: return 0;
 	default: assert(0); return 0;
 	}
 }
@@ -171,8 +174,12 @@ int FilterSubdivFittingPlugin::getPreConditions(const QAction*) const
  * @brief FilterSamplePlugin::postCondition
  * @return
  */
-int FilterSubdivFittingPlugin::postCondition(const QAction*) const
+int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 {
+	switch (ID(action)) {
+	case FP_FITTING_ERROR: return MeshModel::MM_VERTQUALITY + MeshModel::MM_VERTCOLOR;
+	default: break;
+	}
 	return MeshModel::MM_VERTCOORD | MeshModel::MM_FACENORMAL | MeshModel::MM_VERTNORMAL;
 }
 
@@ -241,6 +248,9 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 	case FP_REANALYSIS_CA: {
 
 	} break;
+	case FP_FITTING_ERROR: {
+
+	} break;
 	default :
 		assert(0);
 	}
@@ -262,15 +272,15 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		unsigned int& /*postConditionMask*/,
 		vcg::CallBackPos *cb)
 {
+	MeshModel* curMM = md.mm();
+	CMeshO&    m     = curMM->cm;
+
+	mdptr      = &md;
+	ptsample   = md.getMesh(par.getMeshId("samples"));
+	ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
+
 	switch(ID(action)) {
 	case FP_SUBDIV_FITTING: {
-		MeshModel* curMM = md.mm();
-		CMeshO&    m     = curMM->cm;
-
-		mdptr      = &md;
-		ptsample   = md.getMesh(par.getMeshId("samples"));
-		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
-
 		if (!initflag) {
 			assignPerElementAtributes();
 			initflag = true;
@@ -278,14 +288,14 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		if (topochange){
 			updateControlVertexAttribute();
 			solvePickupVec();
-			updateVertexComplete(ptctrlmesh);
+			updateVertexComplete(ptctrlmesh, "ControlMeshUpdate");
 			topochange = false;
 		}
 
 		if (sampleupdate) {
 			parameterizeSamples(FootPointMode::MODE_MESH);
 			updateLimitStencils(UpdateOptions::MODE_INIT);
-			updateVertexComplete(ptsample);
+			updateVertexComplete(ptsample, "SampleUpdate");
 			sampleupdate = false;
 		}
 
@@ -298,6 +308,9 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		displayResults(par);
 
 
+	} break;
+	case FP_FITTING_ERROR: {
+		 ptsample->updateDataMask(MeshModel::MM_VERTQUALITY);
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -391,35 +404,33 @@ void FilterSubdivFittingPlugin::assignPerElementAtributes()
 
 
 	CMeshO::PerVertexAttributeHandle<bool> tobeupdate;
-	if (tri::HasPerVertexAttribute(ptsample->cm, "ControlMeshUpdate")) {
+	if (tri::HasPerVertexAttribute(ptsample->cm, "SampleUpdate")) {
 		tobeupdate =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "SampleUpdate");
 		if (!tri::Allocator<CMeshO>::IsValidHandle<bool>(ptsample->cm, tobeupdate)) {
 			throw MLException("attribute already exists with a different type");
 		}
 	}
 	else
-		tobeupdate = tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
+		tobeupdate = tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptsample->cm, "SampleUpdate");
 
 	for (auto vi = ptsample->cm.vert.begin(); vi != ptsample->cm.vert.end(); vi++) {
 		if (!vi->IsD()) {
 			tobeupdate[vi] = true;
 		}
-		else
-			std::cout << "asdasd" << std::endl;
 	}
 
 		CMeshO::PerVertexAttributeHandle<bool> tobeupdate2;
-	if (tri::HasPerVertexAttribute(ptctrlmesh->cm, "SampleUpdate")) {
+	if (tri::HasPerVertexAttribute(ptctrlmesh->cm, "ControlMeshUpdate")) {
 		tobeupdate2 =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "SampleUpdate");
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "ControlMeshUpdate");
 		if (!tri::Allocator<CMeshO>::IsValidHandle<bool>(ptctrlmesh->cm, tobeupdate2)) {
 			throw MLException("attribute already exists with a different type");
 		}
 	}
 	else
 		tobeupdate2 =
-			tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptctrlmesh->cm, "SampleUpdate");
+			tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptctrlmesh->cm, "ControlMeshUpdate");
 
 	for (auto vi = ptctrlmesh->cm.vert.begin(); vi != ptctrlmesh->cm.vert.end(); vi++) {
 		if (!vi->IsD()) {
@@ -431,7 +442,7 @@ void FilterSubdivFittingPlugin::assignPerElementAtributes()
 void FilterSubdivFittingPlugin::parameterizeSamples(FootPointMode mode)
 {
 	auto tobeupdate =
-		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
+		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "SampleUpdate");
 
 	for (auto si = ptsample->cm.vert.begin(); si != ptsample->cm.vert.end(); si++) {
 		if ((!si->IsD()) && tobeupdate[si])
@@ -489,7 +500,7 @@ void FilterSubdivFittingPlugin::updateControlVertexAttribute()
 	// store valence for each vertex
 	auto val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(ptctrlmesh->cm, "Valence");
 	auto tobeupdate =
-		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "SampleUpdate");
+		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "ControlMeshUpdate");
 
 	for (auto vi = ptctrlmesh->cm.vert.begin(); vi != ptctrlmesh->cm.vert.end(); vi++) {
 		if ((!vi->IsD()) && tobeupdate[vi]) {
@@ -771,9 +782,9 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 		sqrtf(height * height + squared_parallel_dist), Point3f(l0, l1, l2));
 }
 
-void FilterSubdivFittingPlugin::updateVertexComplete(MeshModel* mm)
+void FilterSubdivFittingPlugin::updateVertexComplete(MeshModel* mm, std::string field)
 {
-	auto tobeupdate = tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(mm->cm, "ControlMeshUpdate");
+	auto tobeupdate = tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(mm->cm, field);
 	for (auto vi = mm->cm.vert.begin(); vi != mm->cm.vert.end(); vi++) {
 		if (!vi->IsD()) {
 			tobeupdate[vi] = false;
@@ -794,7 +805,7 @@ void FilterSubdivFittingPlugin::updateLimitStencils(UpdateOptions mode) {
 			tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(ptsample->cm, "BaryCoord");
 
 		auto ControlMeshUpdate =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "SampleUpdate");
 
 		// foot points should be solved now
 		for (auto vi = ptsample->cm.vert.begin(); vi != ptsample->cm.vert.end(); vi++) {

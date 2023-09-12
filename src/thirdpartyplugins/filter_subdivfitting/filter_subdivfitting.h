@@ -51,7 +51,7 @@ class FilterSubdivFittingPlugin : public QObject, public FilterPlugin
 
 public:
 	//enum used to give an ID to every filter implemented in the plugin
-	enum FileterIds { FP_SUBDIV_FITTING = 0, FP_REANALYSIS_CA = 1 };
+	enum FileterIds { FP_SUBDIV_FITTING = 0, FP_REANALYSIS_CA = 1, FP_FITTING_ERROR = 2 };
 	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
 	enum UpdateOptions { MODE_INIT = 0, MODE_UPDATE = 1 };
 
@@ -84,7 +84,7 @@ private:
 	void                           updateControlVertexAttribute();
 	void                           solvePickupVec();
 	void                           updateLimitStencils(UpdateOptions mode);
-	void                           updateVertexComplete(MeshModel* mm);
+	void                           updateVertexComplete(MeshModel* mm, std::string field);
 	void                           assembleFittingQuery(const RichParameterList& par);
 	vcg::Point3f                   evaluateLimitPoint(int vi);
 	void                           displayResults(const RichParameterList& par);
@@ -109,6 +109,7 @@ private:
 	MeshDocument*                                      mdptr       = nullptr;
 	MeshModel*                                         ptsample   = nullptr;
 	MeshModel*                                         ptctrlmesh  = nullptr;
+	MeshModel*                                         fittingres  = nullptr;
 	Eigen::MatrixXd                                    splpts;
 	Eigen::MatrixXd                                    projectedsplpts;
 	Eigen::MatrixXd                                    controlmesh;
