@@ -107,7 +107,8 @@ private:
 	std::map<int, Eigen::MatrixXd>                     cacheVinv;
 	std::map<int, Eigen::MatrixXd>                     cacheAbarApow;
 	MeshDocument*                                      mdptr       = nullptr;
-	MeshModel*                                         ptsample   = nullptr;
+	MeshModel*                                         ptsource    = nullptr;
+	MeshModel*                                         ptsample    = nullptr;
 	MeshModel*                                         ptctrlmesh  = nullptr;
 	MeshModel*                                         fittingres  = nullptr;
 	Eigen::MatrixXd                                    splpts;

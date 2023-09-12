@@ -65,7 +65,7 @@ static double alpha(int N)
  */
 FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 { 
-	typeList = { FP_SUBDIV_FITTING};
+	typeList = {FP_SUBDIV_FITTING, FP_FITTING_ERROR};
 
 	for(const ActionIDType& tt : typeList)
 		actionList.push_back(new QAction(filterName(tt), this));
@@ -111,6 +111,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	switch(filterId) {
 	case FP_SUBDIV_FITTING :
 		return "Fitting samples by a subdivision surface";
+	case FP_FITTING_ERROR: return "Coloring fitting error";
 	default :
 		assert(0);
 		return "Unknown Filter";
@@ -207,6 +208,8 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 				break;
 			}
 		}
+		parlst.addParam(
+			RichMesh("source_mesh", md.mm()->id(), &md, "Source Mesh", "Mesh to be sampled"));
 		parlst.addParam(RichMesh(
 			"samples",
 			md.mm()->id(),
@@ -276,11 +279,14 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	CMeshO&    m     = curMM->cm;
 
 	mdptr      = &md;
-	ptsample   = md.getMesh(par.getMeshId("samples"));
-	ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
 
 	switch(ID(action)) {
 	case FP_SUBDIV_FITTING: {
+
+		ptsource   = md.getMesh(par.getMeshId("source_mesh"));
+		ptsample   = md.getMesh(par.getMeshId("samples"));
+		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
+
 		if (!initflag) {
 			assignPerElementAtributes();
 			initflag = true;
@@ -310,7 +316,26 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 	} break;
 	case FP_FITTING_ERROR: {
-		 ptsample->updateDataMask(MeshModel::MM_VERTQUALITY);
+		if (fittingres == nullptr)
+			throw MLException("No fitting result!");
+
+		fittingres->updateDataMask(MeshModel::MM_VERTQUALITY);
+
+		for (auto& vi = fittingres->cm.vert.begin(); vi != fittingres->cm.vert.end(); vi++) {
+			if (!vi->IsD()) {
+				vi->Q() = std::numeric_limits<float>::max();
+				for (auto& fi = ptsource->cm.face.begin(); fi != ptsource->cm.face.end(); fi++) {
+					auto p = distancePointTriangle(*vi, *fi);
+					if (p.first < vi->Q())
+						vi->Q() = p.first;
+				}
+			}
+		}
+
+		tri::UpdateQuality<CMeshO>::VertexNormalize(fittingres->cm);
+		tri::UpdateColor<CMeshO>::PerVertexQualityRamp(fittingres->cm);
+		fittingres->updateDataMask(MeshModel::MM_VERTCOLOR);
+
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -925,6 +950,8 @@ void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
 		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
 			destModel->cm.vert[vi].P() = evaluateLimitPoint(vi);
 		}
+
+		fittingres = destModel;
 	}
 
 	if (check_bary_coord) {
