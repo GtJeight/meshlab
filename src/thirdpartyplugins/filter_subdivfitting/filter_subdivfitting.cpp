@@ -273,24 +273,18 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 		if (!initflag) {
 			assignPerElementAtributes();
-			log("assignPerElementAtributes");
 			initflag = true;
 		}
 		if (topochange){
 			updateControlVertexAttribute();
-			log("updateControlVertexAttribute");
 			solvePickupVec();
-			log("solvePickupVec");
-			//updateVertexComplete(ptctrlmesh);
-			log("updateVertexComplete");
+			updateVertexComplete(ptctrlmesh);
 			topochange = false;
 		}
 
 		if (sampleupdate) {
 			parameterizeSamples(FootPointMode::MODE_MESH);
-			log("uparameterizeSamples");
 			updateLimitStencils(UpdateOptions::MODE_INIT);
-			log("updateLimitStencils");
 			updateVertexComplete(ptsample);
 			sampleupdate = false;
 		}
@@ -298,7 +292,6 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 		if (!solveflag) {
 			assembleFittingQuery(par);
-			log("assembleFittingQuery");
 			solveflag = true;
 		}
 
@@ -398,33 +391,35 @@ void FilterSubdivFittingPlugin::assignPerElementAtributes()
 
 
 	CMeshO::PerVertexAttributeHandle<bool> tobeupdate;
-	if (tri::HasPerVertexAttribute(ptsample->cm, "tobeUpdate")) {
+	if (tri::HasPerVertexAttribute(ptsample->cm, "ControlMeshUpdate")) {
 		tobeupdate =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "tobeUpdate");
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
 		if (!tri::Allocator<CMeshO>::IsValidHandle<bool>(ptsample->cm, tobeupdate)) {
 			throw MLException("attribute already exists with a different type");
 		}
 	}
 	else
-		tobeupdate = tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptsample->cm, "tobeUpdate");
+		tobeupdate = tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
 
 	for (auto vi = ptsample->cm.vert.begin(); vi != ptsample->cm.vert.end(); vi++) {
 		if (!vi->IsD()) {
 			tobeupdate[vi] = true;
 		}
+		else
+			std::cout << "asdasd" << std::endl;
 	}
 
 		CMeshO::PerVertexAttributeHandle<bool> tobeupdate2;
-	if (tri::HasPerVertexAttribute(ptctrlmesh->cm, "tobeUpdate2")) {
+	if (tri::HasPerVertexAttribute(ptctrlmesh->cm, "SampleUpdate")) {
 		tobeupdate2 =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "tobeUpdate2");
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "SampleUpdate");
 		if (!tri::Allocator<CMeshO>::IsValidHandle<bool>(ptctrlmesh->cm, tobeupdate2)) {
 			throw MLException("attribute already exists with a different type");
 		}
 	}
 	else
 		tobeupdate2 =
-			tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptctrlmesh->cm, "tobeUpdate2");
+			tri::Allocator<CMeshO>::AddPerVertexAttribute<bool>(ptctrlmesh->cm, "SampleUpdate");
 
 	for (auto vi = ptctrlmesh->cm.vert.begin(); vi != ptctrlmesh->cm.vert.end(); vi++) {
 		if (!vi->IsD()) {
@@ -436,10 +431,9 @@ void FilterSubdivFittingPlugin::assignPerElementAtributes()
 void FilterSubdivFittingPlugin::parameterizeSamples(FootPointMode mode)
 {
 	auto tobeupdate =
-		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "tobeUpdate");
+		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
 
-	auto spl = *ptsample;
-	for (auto si = spl.cm.vert.begin(); si != spl.cm.vert.end(); si++) {
+	for (auto si = ptsample->cm.vert.begin(); si != ptsample->cm.vert.end(); si++) {
 		if ((!si->IsD()) && tobeupdate[si])
 			solveFootPoint(&(*si), mode);
 	}
@@ -489,22 +483,22 @@ void FilterSubdivFittingPlugin::solveFootPoint(CVertexO* v, FootPointMode mode)
 
 void FilterSubdivFittingPlugin::updateControlVertexAttribute()
 {
-	auto& mm = *ptctrlmesh;
-	mm.cm.face.EnableFFAdjacency();
-	tri::UpdateTopology<CMeshO>::FaceFace(mm.cm);
+	ptctrlmesh->cm.face.EnableFFAdjacency();
+	tri::UpdateTopology<CMeshO>::FaceFace(ptctrlmesh->cm);
 
 	// store valence for each vertex
-	auto val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(mm.cm, "Valence");
-	auto tobeupdate = tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(mm.cm, "tobeUpdate2");
+	auto val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(ptctrlmesh->cm, "Valence");
+	auto tobeupdate =
+		tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptctrlmesh->cm, "SampleUpdate");
 
-	for (auto vi = mm.cm.vert.begin(); vi != mm.cm.vert.end(); vi++) {
+	for (auto vi = ptctrlmesh->cm.vert.begin(); vi != ptctrlmesh->cm.vert.end(); vi++) {
 		if ((!vi->IsD()) && tobeupdate[vi]) {
 			val[vi] = 0;
 		}
 	}
 
 	// TODO: not updating precisely
-	for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+	for (auto fi = ptctrlmesh->cm.face.begin(); fi != ptctrlmesh->cm.face.end(); fi++) {
 		if (!fi->IsD()) {
 			val[fi->V(0)] += 1;
 			val[fi->V(1)] += 1;
@@ -522,29 +516,28 @@ void FilterSubdivFittingPlugin::updateControlVertexAttribute()
 
 void FilterSubdivFittingPlugin::solvePickupVec()
 {
-	auto& mm = *ptctrlmesh;
-	auto  val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(mm.cm, "Valence");
+	auto  val = tri::Allocator<CMeshO>::FindPerVertexAttribute<int>(ptctrlmesh->cm, "Valence");
 
 	// Register patch pickup matrix attribute
 	auto matPatchSubdiv =
 		tri::Allocator<CMeshO>::FindPerFaceAttribute<std::vector<Eigen::MatrixXd>>(
-			mm.cm, "PatchSubdiv");
+			ptctrlmesh->cm, "PatchSubdiv");
 
 	// initialize subdiv mat
-	for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+	for (auto fi = ptctrlmesh->cm.face.begin(); fi != ptctrlmesh->cm.face.end(); fi++) {
 		if (!(*fi).IsD()) {
 			matPatchSubdiv[fi].resize(4);
 			for (int vi = 0; vi < 3; vi++) {
 				// allocate zero mat
 				int vid                = fi->V(vi)->Index();
-				matPatchSubdiv[fi][vi] = Eigen::MatrixXd::Zero(val[vid] + 6, mm.cm.vn);
+				matPatchSubdiv[fi][vi] = Eigen::MatrixXd::Zero(val[vid] + 6, ptctrlmesh->cm.vn);
 			}
-			matPatchSubdiv[fi][3] = Eigen::MatrixXd::Zero(12, mm.cm.vn);
+			matPatchSubdiv[fi][3] = Eigen::MatrixXd::Zero(12, ptctrlmesh->cm.vn);
 		}
 	}
 
 	Eigen::Array4d tempedge({0.375, 0.375, 0.125, 0.125});
-	for (auto fi = mm.cm.face.begin(); fi != mm.cm.face.end(); fi++) {
+	for (auto fi = ptctrlmesh->cm.face.begin(); fi != ptctrlmesh->cm.face.end(); fi++) {
 		if (!(*fi).IsD()) {
 			CFaceO*          startfp = &*fi;
 			std::vector<int> ring1, ring2, ringNp;
@@ -780,7 +773,7 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 
 void FilterSubdivFittingPlugin::updateVertexComplete(MeshModel* mm)
 {
-	auto tobeupdate = tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(mm->cm, "tobeUpdate");
+	auto tobeupdate = tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(mm->cm, "ControlMeshUpdate");
 	for (auto vi = mm->cm.vert.begin(); vi != mm->cm.vert.end(); vi++) {
 		if (!vi->IsD()) {
 			tobeupdate[vi] = false;
@@ -789,24 +782,23 @@ void FilterSubdivFittingPlugin::updateVertexComplete(MeshModel* mm)
 }
 
 void FilterSubdivFittingPlugin::updateLimitStencils(UpdateOptions mode) {
-	auto& spl = *ptsample;
 	switch (mode) {
 	case FilterSubdivFittingPlugin::MODE_INIT: {
 		auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
-			spl.cm, "LimitStencil");
+			ptsample->cm, "LimitStencil");
 
-		auto ftptrs =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(spl.cm, "FootTriangle");
+		auto ftptrs = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(
+			ptsample->cm, "FootTriangle");
 
 		auto ftbarycoords =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(spl.cm, "BaryCoord");
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(ptsample->cm, "BaryCoord");
 
-		auto tobeUpdate =
-			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(spl.cm, "tobeUpdate");
+		auto ControlMeshUpdate =
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "ControlMeshUpdate");
 
 		// foot points should be solved now
-		for (auto vi = spl.cm.vert.begin(); vi != spl.cm.vert.end(); vi++) {
-			if ((!vi->IsD()) && tobeUpdate[vi]) {
+		for (auto vi = ptsample->cm.vert.begin(); vi != ptsample->cm.vert.end(); vi++) {
+			if ((!vi->IsD()) && ControlMeshUpdate[vi]) {
 				Eigen::VectorXd densestencil =
 					weightsPatch(ftptrs[vi], ftbarycoords[vi][1], ftbarycoords[vi][2]);
 				ls[vi] = densestencil.sparseView(1., MATEPS);
