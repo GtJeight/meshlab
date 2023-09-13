@@ -751,25 +751,32 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 	float squared_parallel_dist = 0.f, l0 = 0.f, l1 = 0.f, l2 = 0.f;
 	auto  project = p - height * n;
 
+	float p01 = (project - v0).dot((v1 - v0).normalized());
+	float p10 = (project - v1).dot((v0 - v1).normalized());
+	float p02 = (project - v0).dot((v2 - v0).normalized());
+	float p20 = (project - v2).dot((v0 - v2).normalized());
+	float p12 = (project - v1).dot((v2 - v1).normalized());
+	float p21 = (project - v2).dot((v1 - v2).normalized());
+
 	auto det = [](const Point3f& v0, const Point3f& v1, const Point3f& v2) -> float {
 		return v0[0] * v1[1] * v2[2] + v0[1] * v1[2] * v2[0] + v0[2] * v1[0] * v2[1] -
 			   v0[2] * v1[1] * v2[0] - v0[1] * v1[0] * v2[2] - v0[0] * v1[2] * v2[1];
 	};
 
 	// case corner
-	if ((project - v0).dot(v0 - v1) > 0.f && (project - v0).dot(v0 - v2) > 0.f) {
+	if ((p01 < 0.f) && (p02 < 0.f)) {
 		squared_parallel_dist = (project - v0).SquaredNorm();
 		l0                    = 1.f;
 		l1                    = 0.f;
 		l2                    = 0.f;
 	}
-	else if ((project - v1).dot(v1 - v2) > 0.f && (project - v1).dot(v1 - v0) > 0.f) {
+	else if ((p12 < 0.f) && (p10 < 0.f)) {
 		squared_parallel_dist = (project - v1).SquaredNorm();
 		l0                    = 0.f;
 		l1                    = 1.f;
 		l2                    = 0.f;
 	}
-	else if ((project - v2).dot(v2 - v0) > 0.f && (project - v2).dot(v2 - v1) > 0.f) {
+	else if ((p20 < 0.f) && (p21 < 0.f)) {
 		squared_parallel_dist = (project - v2).SquaredNorm();
 		l0                    = 0.f;
 		l1                    = 0.f;
@@ -781,23 +788,29 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 		l1         = det(n, v0 - project, project - v2) / detf;
 		l2         = det(n, v0 - v1, v1 - project) / detf;
 
-		if (l0 < 0.f) {
-			l0 = 0.f;
-			l1 = (project - v2).dot((v1 - v2).normalized()) / (v1 - v2).Norm();
-			l2 = 1.f - l1;
-			squared_parallel_dist = (project - v2).SquaredNorm() - l1 * l1;
+		if ((l0 < 0.f) && (p12 * p21 >= 0.f)) {
+			l0                    = 0.f;
+			l1                    = p21 / (v1 - v2).Norm();
+			l2                    = 1.f - l1;
+			squared_parallel_dist = (project - v2).SquaredNorm() - p21 * p21;
+			if (l1 > 1.f)
+				std::cout << l1 << std::endl;
 		}
-		else if (l1 < 0.f) {
-			l1 = 0.f;
-			l2 = (project - v0).dot((v2 - v0).normalized()) / (v2 - v0).Norm();
-			l0 = 1.f - l2;
-			squared_parallel_dist = (project - v0).SquaredNorm() - l2 * l2;
+		else if ((l1 < 0.f) && (p02 * p20 >= 0.f)) {
+			l1                    = 0.f;
+			l2                    = p02 / (v2 - v0).Norm();
+			l0                    = 1.f - l2;
+			squared_parallel_dist = (project - v0).SquaredNorm() - p02 * p02;
+			if (l2 > 1.f)
+				std::cout << l2 << std::endl;
 		}
-		else if (l2 < 0.f) {
-			l2 = 0.f;
-			l0 = (project - v1).dot((v0 - v1).normalized()) / (v0 - v1).Norm();
-			l1 = 1.f - l0;
-			squared_parallel_dist = (project - v1).SquaredNorm() - l0 * l0;
+		else if ((l2 < 0.f) && (p01 * p10 >= 0.f)) {
+			l2                    = 0.f;
+			l0                    = p10 / (v0 - v1).Norm();
+			l1                    = 1.f - l0;
+			squared_parallel_dist = (project - v1).SquaredNorm() - p10 * p10;
+			if (l0 > 1.f)
+				std::cout << l0 << std::endl;
 		}
 		else
 			squared_parallel_dist = 0.f;
