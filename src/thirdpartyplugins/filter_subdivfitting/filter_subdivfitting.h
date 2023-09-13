@@ -51,7 +51,12 @@ class FilterSubdivFittingPlugin : public QObject, public FilterPlugin
 
 public:
 	//enum used to give an ID to every filter implemented in the plugin
-	enum FileterIds { FP_SUBDIV_FITTING = 0, FP_REANALYSIS_CA = 1, FP_FITTING_ERROR = 2 };
+	enum FileterIds {
+		FP_SUBDIV_FITTING      = 0,
+		FP_REANALYSIS_CA       = 1,
+		FP_FITTING_ERROR       = 2,
+		FP_FITTING_CACHE_CLEAR = 3
+	};
 	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
 	enum UpdateOptions { MODE_INIT = 0, MODE_UPDATE = 1 };
 
@@ -78,6 +83,7 @@ public:
 private:
 	// Implement following https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/loop.pdf
 	void                           assignPerElementAtributes();
+	void                           clearFittingCache();
 	void                           parameterizeSamples(FootPointMode mode);
 	void                           solveFootPoint(CVertexO* v,FootPointMode mode);
 	std::pair<float, vcg::Point3f> distancePointTriangle(const CVertexO& p, const CFaceO& f);

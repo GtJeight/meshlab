@@ -65,7 +65,7 @@ static double alpha(int N)
  */
 FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 { 
-	typeList = {FP_SUBDIV_FITTING, FP_FITTING_ERROR};
+	typeList = {FP_SUBDIV_FITTING, FP_FITTING_ERROR, FP_FITTING_CACHE_CLEAR};
 
 	for(const ActionIDType& tt : typeList)
 		actionList.push_back(new QAction(filterName(tt), this));
@@ -91,8 +91,9 @@ QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 {
 	switch(filterId) {
 	case FP_SUBDIV_FITTING :
-		return "Subdivision Surface Fitting";
-	case FP_FITTING_ERROR: return "Fitting Distance Error";
+		return "Fitting: Subdivision Surface Fitting";
+	case FP_FITTING_ERROR: return "Fitting: Render Distance Error";
+	case FP_FITTING_CACHE_CLEAR: return "Fitting: Clear Cache";
 	default :
 		assert(0);
 		return "";
@@ -112,6 +113,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	case FP_SUBDIV_FITTING :
 		return "Fitting samples by a subdivision surface";
 	case FP_FITTING_ERROR: return "Coloring fitting error";
+	case FP_FITTING_CACHE_CLEAR: return "";
 	default :
 		assert(0);
 		return "Unknown Filter";
@@ -131,6 +133,7 @@ FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const
 	case FP_SUBDIV_FITTING :
 	case FP_REANALYSIS_CA:
 	case FP_FITTING_ERROR:
+	case FP_FITTING_CACHE_CLEAR:
 		return FilterPlugin::Other;
 	default :
 		assert(0);
@@ -158,6 +161,7 @@ int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
 	case FP_REANALYSIS_CA:
 		return MeshModel::MM_FACEFACETOPO | MeshModel::MM_VERTFACETOPO;
 	case FP_FITTING_ERROR: return 0;
+	case FP_FITTING_CACHE_CLEAR: return 0;
 	default: assert(0); return 0;
 	}
 }
@@ -179,6 +183,7 @@ int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 {
 	switch (ID(action)) {
 	case FP_FITTING_ERROR: return MeshModel::MM_VERTQUALITY + MeshModel::MM_VERTCOLOR;
+	case FP_FITTING_CACHE_CLEAR:
 	default: break;
 	}
 	return MeshModel::MM_VERTCOORD | MeshModel::MM_FACENORMAL | MeshModel::MM_VERTNORMAL;
@@ -252,12 +257,39 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 
 	} break;
 	case FP_FITTING_ERROR: {
-
+		parlst.addParam(RichMesh("fitting_samples", md.mm()->id(), &md, "Fitting Samples", ""));
+		parlst.addParam(RichMesh("dest_mesh", md.mm()->id(), &md, "Destination Mesh", ""));
+	} break;
+	case FP_FITTING_CACHE_CLEAR: {
 	} break;
 	default :
 		assert(0);
 	}
 	return parlst;
+}
+
+void FilterSubdivFittingPlugin::clearFittingCache()
+{
+	//TODO: per element attibute not cleared yet
+	initflag     = false;
+	topochange   = true;
+	sampleupdate = true;
+	solveflag    = false;
+	cacheP.clear();
+	cacheAbar.clear();
+	cacheV.clear();
+	cacheVinv.clear();
+	cacheAbarApow.clear();
+	mdptr           = nullptr;
+	ptsource        = nullptr;
+	ptsample        = nullptr;
+	ptctrlmesh      = nullptr;
+	fittingres      = nullptr;
+	splpts          = Eigen::MatrixXd();
+	projectedsplpts = Eigen::MatrixXd();
+	controlmesh     = Eigen::MatrixXd();
+	AT              = Eigen::SparseMatrix<double>();
+	ATA             = Eigen::SparseMatrix<double>();
 }
 
 /**
@@ -316,15 +348,15 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 	} break;
 	case FP_FITTING_ERROR: {
-		if (fittingres == nullptr)
-			throw MLException("No fitting result!");
+		auto fittingspls = md.getMesh(par.getMeshId("fitting_samples"));
+		auto destmesh = md.getMesh(par.getMeshId("dest_mesh"));
 
-		fittingres->updateDataMask(MeshModel::MM_VERTQUALITY);
+		fittingspls->updateDataMask(MeshModel::MM_VERTQUALITY);
 
-		for (auto& vi = fittingres->cm.vert.begin(); vi != fittingres->cm.vert.end(); vi++) {
+		for (auto& vi = fittingspls->cm.vert.begin(); vi != fittingspls->cm.vert.end(); vi++) {
 			if (!vi->IsD()) {
 				vi->Q() = std::numeric_limits<float>::max();
-				for (auto& fi = ptsource->cm.face.begin(); fi != ptsource->cm.face.end(); fi++) {
+				for (auto& fi = destmesh->cm.face.begin(); fi != destmesh->cm.face.end(); fi++) {
 					auto p = distancePointTriangle(*vi, *fi);
 					if (p.first < vi->Q())
 						vi->Q() = p.first;
@@ -332,10 +364,13 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			}
 		}
 
-		tri::UpdateQuality<CMeshO>::VertexNormalize(fittingres->cm);
-		tri::UpdateColor<CMeshO>::PerVertexQualityRamp(fittingres->cm);
-		fittingres->updateDataMask(MeshModel::MM_VERTCOLOR);
+		tri::UpdateQuality<CMeshO>::VertexNormalize(fittingspls->cm);
+		tri::UpdateColor<CMeshO>::PerVertexQualityRamp(fittingspls->cm);
+		fittingspls->updateDataMask(MeshModel::MM_VERTCOLOR);
 
+	} break;
+	case FP_FITTING_CACHE_CLEAR: {
+		clearFittingCache();
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -793,24 +828,18 @@ std::pair<float,Point3f> FilterSubdivFittingPlugin::distancePointTriangle(const 
 			l1                    = p21 / (v1 - v2).Norm();
 			l2                    = 1.f - l1;
 			squared_parallel_dist = (project - v2).SquaredNorm() - p21 * p21;
-			if (l1 > 1.f)
-				std::cout << l1 << std::endl;
 		}
 		else if ((l1 < 0.f) && (p02 * p20 >= 0.f)) {
 			l1                    = 0.f;
 			l2                    = p02 / (v2 - v0).Norm();
 			l0                    = 1.f - l2;
 			squared_parallel_dist = (project - v0).SquaredNorm() - p02 * p02;
-			if (l2 > 1.f)
-				std::cout << l2 << std::endl;
 		}
 		else if ((l2 < 0.f) && (p01 * p10 >= 0.f)) {
 			l2                    = 0.f;
 			l0                    = p10 / (v0 - v1).Norm();
 			l1                    = 1.f - l0;
 			squared_parallel_dist = (project - v1).SquaredNorm() - p10 * p10;
-			if (l0 > 1.f)
-				std::cout << l0 << std::endl;
 		}
 		else
 			squared_parallel_dist = 0.f;
