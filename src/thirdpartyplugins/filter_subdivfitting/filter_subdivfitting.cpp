@@ -65,7 +65,12 @@ static double alpha(int N)
  */
 FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 { 
-	typeList = {FP_SUBDIV_FITTING, FP_FITTING_ERROR, FP_FITTING_CACHE_CLEAR};
+	typeList = {
+		FP_SUBDIV_FITTING,
+		FP_FITTING_ERROR,
+		FP_FITTING_CACHE_CLEAR,
+		FP_SIMPLE_SAMPLE_DENSIFY,
+		FP_QUALITY_TRANSFFER};
 
 	for(const ActionIDType& tt : typeList)
 		actionList.push_back(new QAction(filterName(tt), this));
@@ -94,6 +99,8 @@ QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 		return "Fitting: Subdivision Surface Fitting";
 	case FP_FITTING_ERROR: return "Fitting: Render Distance Error";
 	case FP_FITTING_CACHE_CLEAR: return "Fitting: Clear Cache";
+	case FP_SIMPLE_SAMPLE_DENSIFY: return "Fitting: Densify Samples";
+	case FP_QUALITY_TRANSFFER: return "Fitting: Transfer Samples Quality";
 	default :
 		assert(0);
 		return "";
@@ -113,7 +120,10 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	case FP_SUBDIV_FITTING :
 		return "Fitting samples by a subdivision surface";
 	case FP_FITTING_ERROR: return "Coloring fitting error";
-	case FP_FITTING_CACHE_CLEAR: return "";
+	case FP_FITTING_CACHE_CLEAR:
+	case FP_SIMPLE_SAMPLE_DENSIFY:
+	case FP_QUALITY_TRANSFFER:
+		return "";
 	default :
 		assert(0);
 		return "Unknown Filter";
@@ -134,6 +144,8 @@ FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const
 	case FP_REANALYSIS_CA:
 	case FP_FITTING_ERROR:
 	case FP_FITTING_CACHE_CLEAR:
+	case FP_SIMPLE_SAMPLE_DENSIFY:
+	case FP_QUALITY_TRANSFFER:
 		return FilterPlugin::Other;
 	default :
 		assert(0);
@@ -160,8 +172,11 @@ int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
 	case FP_SUBDIV_FITTING:
 	case FP_REANALYSIS_CA:
 		return MeshModel::MM_FACEFACETOPO | MeshModel::MM_VERTFACETOPO;
-	case FP_FITTING_ERROR: return 0;
-	case FP_FITTING_CACHE_CLEAR: return 0;
+	case FP_FITTING_ERROR:
+	case FP_FITTING_CACHE_CLEAR:
+	case FP_SIMPLE_SAMPLE_DENSIFY:
+	case FP_QUALITY_TRANSFFER:
+		return 0;
 	default: assert(0); return 0;
 	}
 }
@@ -184,6 +199,8 @@ int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 	switch (ID(action)) {
 	case FP_FITTING_ERROR: return MeshModel::MM_VERTQUALITY + MeshModel::MM_VERTCOLOR;
 	case FP_FITTING_CACHE_CLEAR:
+	case FP_SIMPLE_SAMPLE_DENSIFY:
+	case FP_QUALITY_TRANSFFER:
 	default: break;
 	}
 	return MeshModel::MM_VERTCOORD | MeshModel::MM_FACENORMAL | MeshModel::MM_VERTNORMAL;
@@ -261,6 +278,14 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 		parlst.addParam(RichMesh("dest_mesh", md.mm()->id(), &md, "Destination Mesh", ""));
 	} break;
 	case FP_FITTING_CACHE_CLEAR: {
+	} break;
+	case FP_SIMPLE_SAMPLE_DENSIFY: {
+		parlst.addParam(RichMesh("tobedensify", md.mm()->id(), &md, "Samples to be Densify", ""));
+		parlst.addParam(RichMesh("ref_mesh", md.mm()->id(), &md, "Referrence Mesh", ""));
+	} break;
+	case FP_QUALITY_TRANSFFER: {
+		parlst.addParam(RichMesh("from", md.mm()->id(), &md, "From which samples", ""));
+		parlst.addParam(RichMesh("to", md.mm()->id(), &md, "To which samples", ""));
 	} break;
 	default :
 		assert(0);
@@ -347,6 +372,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 
 	} break;
+
 	case FP_FITTING_ERROR: {
 		auto fittingspls = md.getMesh(par.getMeshId("fitting_samples"));
 		auto destmesh = md.getMesh(par.getMeshId("dest_mesh"));
@@ -364,14 +390,35 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			}
 		}
 
-		tri::UpdateQuality<CMeshO>::VertexNormalize(fittingspls->cm);
+		//tri::UpdateQuality<CMeshO>::VertexNormalize(fittingspls->cm);
 		tri::UpdateColor<CMeshO>::PerVertexQualityRamp(fittingspls->cm);
 		fittingspls->updateDataMask(MeshModel::MM_VERTCOLOR);
 
 	} break;
+
 	case FP_FITTING_CACHE_CLEAR: {
 		clearFittingCache();
 	} break;
+
+	case FP_SIMPLE_SAMPLE_DENSIFY: {
+		auto tobedensify = md.getMesh(par.getMeshId("tobedensify"));
+		auto refmesh     = md.getMesh(par.getMeshId("ref_mesh"));
+	} break;
+
+	case FP_QUALITY_TRANSFFER: {
+		auto from_ = md.getMesh(par.getMeshId("from"));
+		auto to_   = md.getMesh(par.getMeshId("to"));
+
+		to_->updateDataMask(MeshModel::MM_VERTQUALITY);
+
+		for (int vi = 0; vi < from_->cm.vert.size(); vi++) {
+			to_->cm.vert[vi].Q() = from_->cm.vert[vi].Q();
+		}
+
+		tri::UpdateColor<CMeshO>::PerVertexQualityRamp(to_->cm);
+		to_->updateDataMask(MeshModel::MM_VERTCOLOR);
+	} break;
+
 	default :
 		wrongActionCalled(action);
 	}
