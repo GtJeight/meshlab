@@ -70,7 +70,9 @@ FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 		FP_FITTING_ERROR,
 		FP_FITTING_CACHE_CLEAR,
 		FP_SIMPLE_SAMPLE_DENSIFY,
-		FP_QUALITY_TRANSFFER};
+		FP_QUALITY_TRANSFFER,
+		FP_ADD_SAMPLES
+	};
 
 	for(const ActionIDType& tt : typeList)
 		actionList.push_back(new QAction(filterName(tt), this));
@@ -101,6 +103,7 @@ QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 	case FP_FITTING_CACHE_CLEAR: return "Fitting: Clear Cache";
 	case FP_SIMPLE_SAMPLE_DENSIFY: return "Fitting: Densify Samples";
 	case FP_QUALITY_TRANSFFER: return "Fitting: Transfer Samples Quality";
+	case FP_ADD_SAMPLES: return "Fitting: Add Samples";
 	default :
 		assert(0);
 		return "";
@@ -123,6 +126,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
+	case FP_ADD_SAMPLES:
 		return "";
 	default :
 		assert(0);
@@ -146,6 +150,7 @@ FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
+	case FP_ADD_SAMPLES:
 		return FilterPlugin::Other;
 	default :
 		assert(0);
@@ -176,6 +181,7 @@ int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
+	case FP_ADD_SAMPLES:
 		return 0;
 	default: assert(0); return 0;
 	}
@@ -201,6 +207,7 @@ int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
+	case FP_ADD_SAMPLES:
 	default: break;
 	}
 	return MeshModel::MM_VERTCOORD | MeshModel::MM_FACENORMAL | MeshModel::MM_VERTNORMAL;
@@ -287,6 +294,9 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 		parlst.addParam(RichMesh("from", md.mm()->id(), &md, "From which samples", ""));
 		parlst.addParam(RichMesh("to", md.mm()->id(), &md, "To which samples", ""));
 	} break;
+	case FP_ADD_SAMPLES: {
+		parlst.addParam(RichMesh("add_samples", md.mm()->id(), &md, "Samples to be added", ""));
+	}
 	default :
 		assert(0);
 	}
@@ -418,7 +428,9 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		tri::UpdateColor<CMeshO>::PerVertexQualityRamp(to_->cm);
 		to_->updateDataMask(MeshModel::MM_VERTCOLOR);
 	} break;
+	case FP_ADD_SAMPLES: {
 
+	} break;
 	default :
 		wrongActionCalled(action);
 	}
