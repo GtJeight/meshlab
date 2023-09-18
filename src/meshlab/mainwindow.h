@@ -390,6 +390,7 @@ private:
 	QMenu* filterMenuTexture;
 	QMenu* filterMenuCamera;
 	QMenu* filterMenuOther;
+	QMenu* filterMenuSubdivFitting;
 
 	QMenu* editMenu;
 

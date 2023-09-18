@@ -66,6 +66,7 @@ static double alpha(int N)
 FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 { 
 	typeList = {
+		FP_INIT,
 		FP_SUBDIV_FITTING,
 		FP_FITTING_ERROR,
 		FP_FITTING_CACHE_CLEAR,
@@ -97,6 +98,7 @@ QString FilterSubdivFittingPlugin::vendor() const
 QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 {
 	switch(filterId) {
+	case FP_INIT: return "Fitting: Initialize";
 	case FP_SUBDIV_FITTING :
 		return "Fitting: Subdivision Surface Fitting";
 	case FP_FITTING_ERROR: return "Fitting: Render Distance Error";
@@ -123,6 +125,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	case FP_SUBDIV_FITTING :
 		return "Fitting samples by a subdivision surface";
 	case FP_FITTING_ERROR: return "Coloring fitting error";
+	case FP_INIT:
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
@@ -144,6 +147,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const QAction *a) const
 {
 	switch(ID(a)) {
+	case FP_INIT:
 	case FP_SUBDIV_FITTING :
 	case FP_REANALYSIS_CA:
 	case FP_FITTING_ERROR:
@@ -151,7 +155,7 @@ FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
 	case FP_ADD_SAMPLES:
-		return FilterPlugin::Other;
+		return FilterPlugin::SubdivFitting;
 	default :
 		assert(0);
 		return FilterPlugin::Generic;
@@ -177,6 +181,7 @@ int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
 	case FP_SUBDIV_FITTING:
 	case FP_REANALYSIS_CA:
 		return MeshModel::MM_FACEFACETOPO | MeshModel::MM_VERTFACETOPO;
+	case FP_INIT:
 	case FP_FITTING_ERROR:
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
@@ -204,6 +209,7 @@ int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 {
 	switch (ID(action)) {
 	case FP_FITTING_ERROR: return MeshModel::MM_VERTQUALITY + MeshModel::MM_VERTCOLOR;
+	case FP_INIT:
 	case FP_FITTING_CACHE_CLEAR:
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
@@ -228,29 +234,23 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 {
 	RichParameterList parlst;
 	switch(ID(action)) {
-	case FP_SUBDIV_FITTING: {
+	case FP_INIT: {
 		const MeshModel* target = md.mm();
 		// looking for a second mesh different that the current one
 		for (const MeshModel& t : md.meshIterator()) {
 			if (&t != md.mm()) {
-				target = &t;	// control mesh topo
+				target = &t; // control mesh topo
 				break;
 			}
 		}
 		parlst.addParam(
 			RichMesh("source_mesh", md.mm()->id(), &md, "Source Mesh", "Mesh to be sampled"));
+		parlst.addParam(RichMesh("samples", md.mm()->id(), &md, "Samples", "Samples to be fitted"));
 		parlst.addParam(RichMesh(
-			"samples",
-			md.mm()->id(),
-			&md,
-			"Samples",
-			"Samples to be fitted"));
-		parlst.addParam(RichMesh(
-			"control_mesh",
-			target->id(),
-			&md,
-			"Control mesh",
-			"Control mesh for subdivision"));
+			"control_mesh", target->id(), &md, "Control mesh", "Control mesh for subdivision"));
+	} break;
+
+	case FP_SUBDIV_FITTING: {
 		parlst.addParam(RichBool(
 			"no_fitting",
 			false,
@@ -296,7 +296,7 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 	} break;
 	case FP_ADD_SAMPLES: {
 		parlst.addParam(RichMesh("add_samples", md.mm()->id(), &md, "Samples to be added", ""));
-	}
+	} break;
 	default :
 		assert(0);
 	}
@@ -348,16 +348,17 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	mdptr      = &md;
 
 	switch(ID(action)) {
-	case FP_SUBDIV_FITTING: {
-
+	case FP_INIT: {
 		ptsource   = md.getMesh(par.getMeshId("source_mesh"));
 		ptsample   = md.getMesh(par.getMeshId("samples"));
 		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
-
 		if (!initflag) {
 			assignPerElementAtributes();
 			initflag = true;
 		}
+
+	} break;
+	case FP_SUBDIV_FITTING: {
 		if (topochange){
 			updateControlVertexAttribute();
 			solvePickupVec();
@@ -429,7 +430,32 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		to_->updateDataMask(MeshModel::MM_VERTCOLOR);
 	} break;
 	case FP_ADD_SAMPLES: {
+		sampleupdate = true;
+		auto tobeadd = md.getMesh(par.getMeshId("add_samples"));
+		auto oldVN   = ptsample->cm.VN();
+		auto vi      = tri::Allocator<CMeshO>::AddVertices(ptsample->cm, tobeadd->cm.VN());
 
+		for (int i = 0; i < tobeadd->cm.VN(); i++, vi++) {
+			vi->P() = tobeadd->cm.vert[i].P();
+		}
+
+		auto tobeupdate =
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<bool>(ptsample->cm, "SampleUpdate");
+		for (int i = oldVN; i < ptsample->cm.VN(); i++) {
+			tobeupdate[i] = true;
+		}
+
+		auto ftptrs = tri::Allocator<CMeshO>::FindPerVertexAttribute<const CFaceO*>(
+			ptsample->cm, "FootTriangle");
+		for (int i = oldVN; i < ptsample->cm.VN(); i++) {
+			ftptrs[i] = nullptr;
+		}
+
+		auto ftbarycoord =
+			tri::Allocator<CMeshO>::FindPerVertexAttribute<Point3f>(ptsample->cm, "BaryCoord");
+		for (int i = oldVN; i < ptsample->cm.VN(); i++) {
+			ftbarycoord[i] = Point3f(0, 0, 0);
+		}
 	} break;
 	default :
 		wrongActionCalled(action);

@@ -52,12 +52,14 @@ class FilterSubdivFittingPlugin : public QObject, public FilterPlugin
 public:
 	//enum used to give an ID to every filter implemented in the plugin
 	enum FileterIds {
-		FP_SUBDIV_FITTING      = 0,
-		FP_REANALYSIS_CA       = 1,
-		FP_FITTING_ERROR       = 2,
-		FP_FITTING_CACHE_CLEAR = 3,
-		FP_SIMPLE_SAMPLE_DENSIFY = 4,
-		FP_QUALITY_TRANSFFER = 5
+		FP_INIT,
+		FP_SUBDIV_FITTING,
+		FP_REANALYSIS_CA,
+		FP_FITTING_ERROR,
+		FP_FITTING_CACHE_CLEAR,
+		FP_SIMPLE_SAMPLE_DENSIFY,
+		FP_QUALITY_TRANSFFER,
+		FP_ADD_SAMPLES
 	};
 	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
 	enum UpdateOptions { MODE_INIT = 0, MODE_UPDATE = 1 };

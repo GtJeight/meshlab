@@ -728,6 +728,8 @@ void MainWindow::fillFilterMenu()
 	filterMenu->addMenu(filterMenuCamera);
 	filterMenuOther = new MenuWithToolTip(tr("Other"), this);
 	filterMenu->addMenu(filterMenuOther);
+	filterMenuSubdivFitting = new MenuWithToolTip(tr("SubdivFitting"), this);
+	filterMenu->addMenu(filterMenuSubdivFitting);
 
 
 	//this is used just to fill the menus with alphabetical order
@@ -809,6 +811,9 @@ void MainWindow::fillFilterMenu()
 		}
 		if (filterClass & FilterPlugin::Other) {
 			filterMenuOther->addAction(filterAction);
+		}
+		if (filterClass & FilterPlugin::SubdivFitting) {
+			filterMenuSubdivFitting->addAction(filterAction);
 		}
 
 		//  MeshFilterInterface::Generic :
