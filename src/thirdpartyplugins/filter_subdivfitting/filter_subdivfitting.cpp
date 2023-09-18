@@ -362,9 +362,13 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 	switch(ID(action)) {
 	case FP_INIT: {
+		if (initflag)
+			clearFittingCache();
+
 		ptsource   = md.getMesh(par.getMeshId("source_mesh"));
 		ptsample   = md.getMesh(par.getMeshId("samples"));
 		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
+
 		if (!initflag) {
 			assignPerElementAtributes();
 			initflag = true;
@@ -372,10 +376,14 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 	} break;
 	case FP_SUBDIV_FITTING: {
+		if (!initflag)
+			throw MLException("Not initiated!");
+
 		if (topochange){
 			updateControlVertexAttribute();
 			solvePickupVec();
 			updateVertexComplete(ptctrlmesh, "ControlMeshUpdate");
+			log("topochange");
 			topochange = false;
 		}
 
@@ -383,6 +391,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 			parameterizeSamples(FootPointMode::MODE_MESH);
 			updateLimitStencils(UpdateOptions::MODE_INIT);
 			updateVertexComplete(ptsample, "SampleUpdate");
+			log("sampleupdate");
 			sampleupdate = false;
 		}
 
@@ -390,6 +399,8 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		if (!solveflag) {
 			assembleFittingQuery(par);
 			solveflag = true;
+		}
+		else {
 		}
 
 		displayResults(par);
@@ -443,6 +454,9 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		to_->updateDataMask(MeshModel::MM_VERTCOLOR);
 	} break;
 	case FP_ADD_SAMPLES: {
+		if (!initflag)
+			throw MLException("Not initiated!");
+
 		sampleupdate = true;
 		auto tobeadd = md.getMesh(par.getMeshId("add_samples"));
 		auto oldVN   = ptsample->cm.VN();
