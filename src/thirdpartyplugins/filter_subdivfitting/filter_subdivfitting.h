@@ -96,6 +96,7 @@ private:
 	void                           updateLimitStencils(UpdateOptions mode);
 	void                           updateVertexComplete(MeshModel* mm, std::string field);
 	void                           assembleFittingQuery(const RichParameterList& par);
+	void                           assembleIncrement();
 	vcg::Point3f                   evaluateLimitPoint(int vi);
 	void                           displayResults(const RichParameterList& par);
 	Eigen::VectorXd                weightsPatch(const CFaceO* ft, float v, float w);
@@ -106,11 +107,12 @@ private:
 
 	void testFVOutput(MeshModel& mm);
 
-	float                                              eps        = 1.f / 64.f;
-	bool                                               initflag   = false;
-	bool                                               topochange = true;
+	float                                              eps          = 1.f / 64.f;
+	bool                                               initflag     = false;
+	bool                                               topochange   = true;
 	bool                                               sampleupdate = true;
-	bool                                               solveflag  = false;
+	bool                                               solveflag    = false;
+	int                                                oldvn        = 0;
 	std::map<int, Eigen::MatrixXd>                     cacheP;
 	std::map<int, Eigen::MatrixXd>                     cacheAbar;
 	std::map<int, Eigen::MatrixXd>                     cacheV;
@@ -123,9 +125,11 @@ private:
 	MeshModel*                                         fittingres  = nullptr;
 	Eigen::MatrixXd                                    splpts;
 	Eigen::MatrixXd                                    projectedsplpts;
+	Eigen::MatrixXd                                    dps;
 	Eigen::MatrixXd                                    controlmesh;
 	Eigen::SparseMatrix<double>                        AT;
 	Eigen::SparseMatrix<double>                        ATA;
+	Eigen::SparseMatrix<double>                        dATA;
 	Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
 };
 

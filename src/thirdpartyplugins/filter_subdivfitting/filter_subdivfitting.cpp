@@ -68,6 +68,7 @@ FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 	typeList = {
 		FP_INIT,
 		FP_SUBDIV_FITTING,
+		FP_REANALYSIS_CA,
 		FP_FITTING_ERROR,
 		FP_FITTING_CACHE_CLEAR,
 		FP_SIMPLE_SAMPLE_DENSIFY,
@@ -106,6 +107,7 @@ QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 	case FP_SIMPLE_SAMPLE_DENSIFY: return "Fitting: Densify Samples";
 	case FP_QUALITY_TRANSFFER: return "Fitting: Transfer Samples Quality";
 	case FP_ADD_SAMPLES: return "Fitting: Add Samples";
+	case FP_REANALYSIS_CA: return "Fitting: Reanalysis";
 	default :
 		assert(0);
 		return "";
@@ -130,6 +132,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
 	case FP_ADD_SAMPLES:
+	case FP_REANALYSIS_CA:
 		return "";
 	default :
 		assert(0);
@@ -214,6 +217,7 @@ int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
 	case FP_ADD_SAMPLES:
+	case FP_REANALYSIS_CA:
 	default: break;
 	}
 	return MeshModel::MM_VERTCOORD | MeshModel::MM_FACENORMAL | MeshModel::MM_VERTNORMAL;
@@ -368,6 +372,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		ptsource   = md.getMesh(par.getMeshId("source_mesh"));
 		ptsample   = md.getMesh(par.getMeshId("samples"));
 		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
+		oldvn      = ptsample->cm.VN();
 
 		if (!initflag) {
 			assignPerElementAtributes();
@@ -405,6 +410,11 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 		displayResults(par);
 
+
+	} break;
+
+	case FP_REANALYSIS_CA: {
+		assembleIncrement();
 
 	} break;
 
@@ -483,6 +493,14 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		for (int i = oldVN; i < ptsample->cm.VN(); i++) {
 			ftbarycoord[i] = Point3f(0, 0, 0);
 		}
+
+		auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+			ptsample->cm, "LimitStencil");
+
+		parameterizeSamples(FootPointMode::MODE_MESH);
+		updateLimitStencils(UpdateOptions::MODE_INIT);
+		updateVertexComplete(ptsample, "SampleUpdate");
+		sampleupdate = false;
 	} break;
 	default :
 		wrongActionCalled(action);
@@ -1035,6 +1053,26 @@ void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& pa
 		controlmesh = solver.solve(projectedsplpts);
 	}
 
+}
+
+void FilterSubdivFittingPlugin::assembleIncrement()
+{
+	auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+		ptsample->cm, "LimitStencil");
+
+	splpts.conservativeResize(ptsample->cm.VN(), 3);
+	dATA.resize(ptctrlmesh->cm.VN(), ptctrlmesh->cm.VN());
+	dATA.setZero();
+	dps.resize(ptctrlmesh->cm.VN(),3);
+	dps.setZero();
+	for (int i = oldvn; i < ptsample->cm.VN(); i++) {
+		splpts(i, Eigen::placeholders::all) << ptsample->cm.vert[i].P()[0],
+			ptsample->cm.vert[i].P()[1], ptsample->cm.vert[i].P()[2];
+		dATA += ls[i] * ls[i].transpose();
+		dps += ls[i] * splpts(i, Eigen::placeholders::all);
+	}
+
+	std::cout << dps << std::endl;
 }
 
 Point3f
