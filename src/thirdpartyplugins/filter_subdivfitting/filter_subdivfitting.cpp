@@ -305,21 +305,34 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 
 void FilterSubdivFittingPlugin::clearFittingCache()
 {
-	//TODO: per element attibute not cleared yet
+	if (!initflag)
+		return;
+
+	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "SampleUpdate");
+	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "BaryCoord");
+	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "FootTriangle");
+	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "LimitStencil");
+	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "Valence");
+	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "ControlMeshUpdate");
+	tri::Allocator<CMeshO>::DeletePerFaceAttribute(ptctrlmesh->cm, "PatchSubdiv");
+
 	initflag     = false;
 	topochange   = true;
 	sampleupdate = true;
 	solveflag    = false;
+
 	cacheP.clear();
 	cacheAbar.clear();
 	cacheV.clear();
 	cacheVinv.clear();
 	cacheAbarApow.clear();
+
 	mdptr           = nullptr;
 	ptsource        = nullptr;
 	ptsample        = nullptr;
 	ptctrlmesh      = nullptr;
 	fittingres      = nullptr;
+
 	splpts          = Eigen::MatrixXd();
 	projectedsplpts = Eigen::MatrixXd();
 	controlmesh     = Eigen::MatrixXd();
