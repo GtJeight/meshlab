@@ -96,7 +96,7 @@ private:
 	void                           updateLimitStencils(UpdateOptions mode);
 	void                           updateVertexComplete(MeshModel* mm, std::string field);
 	void                           assembleFittingQuery(const RichParameterList& par);
-	void                           assembleIncrement();
+	void                           assembleIncrement(int rank);
 	vcg::Point3f                   evaluateLimitPoint(int vi);
 	void                           displayResults(const RichParameterList& par);
 	Eigen::VectorXd                weightsPatch(const CFaceO* ft, float v, float w);

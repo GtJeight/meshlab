@@ -282,7 +282,12 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 		}
 		break;
 	case FP_REANALYSIS_CA: {
-
+			parlst.addParam(RichInt(
+				"CA_rank",
+				4,
+				"Rank of CA",
+				" "
+				" "));
 	} break;
 	case FP_FITTING_ERROR: {
 		parlst.addParam(RichMesh("fitting_samples", md.mm()->id(), &md, "Fitting Samples", ""));
@@ -409,13 +414,11 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		}
 
 		displayResults(par);
-
-
 	} break;
 
 	case FP_REANALYSIS_CA: {
-		assembleIncrement();
-
+		int rank = par.getInt("CA_rank");
+		assembleIncrement(rank);
 	} break;
 
 	case FP_FITTING_ERROR: {
@@ -1055,7 +1058,7 @@ void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& pa
 
 }
 
-void FilterSubdivFittingPlugin::assembleIncrement()
+void FilterSubdivFittingPlugin::assembleIncrement(int rank)
 {
 	auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
 		ptsample->cm, "LimitStencil");
@@ -1072,7 +1075,12 @@ void FilterSubdivFittingPlugin::assembleIncrement()
 		dps += ls[i] * splpts(i, Eigen::placeholders::all);
 	}
 
-	std::cout << dps << std::endl;
+	auto R = splpts + dps;
+	Eigen::SparseMatrix<double> B = solver.solve(dATA);
+	Eigen::MatrixXd             rB[3];
+	for (int dim = 0; dim < 3; dim++) {
+
+	}
 }
 
 Point3f
