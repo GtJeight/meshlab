@@ -22,8 +22,10 @@
 ****************************************************************************/
 
 #include "filter_subdivfitting.h"
+#include <QElapsedTimer>
 
 using namespace vcg;
+using hrc = std::chrono::high_resolution_clock;
 
 #define MATEPS 1e-10
 
@@ -365,11 +367,14 @@ void FilterSubdivFittingPlugin::clearFittingCache()
 	ptsample        = nullptr;
 	ptctrlmesh      = nullptr;
 
-	splpts          = Eigen::MatrixXd();
-	projectedsplpts = Eigen::MatrixXd();
-	controlmesh     = Eigen::MatrixXd();
-	AT              = Eigen::SparseMatrix<double>();
-	ATA             = Eigen::SparseMatrix<double>();
+	splpts.setZero();
+	projectedsplpts.setZero();
+	dps.setZero();
+	controlmesh.setZero();
+	CAcontrolmesh.setZero();
+	AT.setZero();
+	ATA.setZero();
+	dATA.setZero();
 }
 
 /**
@@ -429,7 +434,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		}
 
 
-		if (!solveflag) {
+		if (true || !solveflag) {
 			assembleFittingQuery(par);
 			solveflag = true;
 		}
@@ -1049,15 +1054,12 @@ void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& pa
 {
 	projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
 
-	CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls;
-	if (tri::HasPerVertexAttribute(ptsample->cm, "LimitStencil")) {
-		ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+	CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls =
+		tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
 			ptsample->cm, "LimitStencil");
-		if (!tri::Allocator<CMeshO>::IsValidHandle<Eigen::SparseVector<double>>(ptsample->cm, ls)) {
-			throw MLException("attribute already exists with a different type");
-		}
-	}
 
+	QElapsedTimer tt;
+	tt.start();
 	AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
 	for (int si = 0; si != ptsample->cm.vert.size(); si++) {
 		AT.col(si) = ls[si];
@@ -1075,11 +1077,10 @@ void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& pa
 	}
 	else {
 		ATA = AT * AT.transpose();
-
 		solver.compute(ATA);
 		controlmesh = solver.solve(projectedsplpts);
 	}
-
+	std::cout << "Direct Solve: " << tt.elapsed() << " msec" << std::endl;
 }
 
 void FilterSubdivFittingPlugin::assembleIncrement(int rank)
@@ -1092,6 +1093,9 @@ void FilterSubdivFittingPlugin::assembleIncrement(int rank)
 	dATA.setZero();
 	dps.resize(ptctrlmesh->cm.VN(),3);
 	dps.setZero();
+
+	QElapsedTimer tt;
+	tt.start();
 	for (int i = oldvn; i < ptsample->cm.VN(); i++) {
 		splpts(i, Eigen::placeholders::all) << ptsample->cm.vert[i].P()[0],
 			ptsample->cm.vert[i].P()[1], ptsample->cm.vert[i].P()[2];
@@ -1135,6 +1139,8 @@ void FilterSubdivFittingPlugin::assembleIncrement(int rank)
 	CAcontrolmesh(Eigen::placeholders::all, 0) = rB[0] * (KB[0].colPivHouseholderQr().solve(RB[0]));
 	CAcontrolmesh(Eigen::placeholders::all, 1) = rB[1] * (KB[1].colPivHouseholderQr().solve(RB[1]));
 	CAcontrolmesh(Eigen::placeholders::all, 2) = rB[2] * (KB[2].colPivHouseholderQr().solve(RB[2]));
+
+	std::cout << "Reanalysis: " << tt.elapsed() << " msec" << std::endl;
 }
 
 Point3f FilterSubdivFittingPlugin::evaluateLimitPoint(int vi, bool direct)
