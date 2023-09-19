@@ -256,6 +256,12 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 
 	case FP_SUBDIV_FITTING: {
 		parlst.addParam(RichBool(
+			"direct_solver",
+			false,
+			"Direct Solvor",
+			" "
+			" "));
+		parlst.addParam(RichBool(
 			"no_fitting",
 			false,
 			"Push to Limit Position only",
@@ -282,12 +288,30 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 		}
 		break;
 	case FP_REANALYSIS_CA: {
-			parlst.addParam(RichInt(
-				"CA_rank",
-				4,
-				"Rank of CA",
-				" "
-				" "));
+		parlst.addParam(RichInt(
+			"CA_rank",
+			4,
+			"Rank of CA",
+			" "
+			" "));
+		parlst.addParam(RichBool(
+			"show_new_mesh",
+			false,
+			"Show New Control Mesh",
+			" "
+			" "));
+		parlst.addParam(RichBool(
+			"show_limit_samples",
+			false,
+			"Show Limit Samples",
+			" "
+			" "));
+		parlst.addParam(RichBool(
+			"check_bary_coord",
+			false,
+			"Check Barycenter",
+			" "
+			" "));
 	} break;
 	case FP_FITTING_ERROR: {
 		parlst.addParam(RichMesh("fitting_samples", md.mm()->id(), &md, "Fitting Samples", ""));
@@ -340,7 +364,6 @@ void FilterSubdivFittingPlugin::clearFittingCache()
 	ptsource        = nullptr;
 	ptsample        = nullptr;
 	ptctrlmesh      = nullptr;
-	fittingres      = nullptr;
 
 	splpts          = Eigen::MatrixXd();
 	projectedsplpts = Eigen::MatrixXd();
@@ -413,12 +436,13 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		else {
 		}
 
-		displayResults(par);
+		displayResults(par, true);
 	} break;
 
 	case FP_REANALYSIS_CA: {
 		int rank = par.getInt("CA_rank");
 		assembleIncrement(rank);
+		displayResults(par, false);
 	} break;
 
 	case FP_FITTING_ERROR: {
@@ -1075,34 +1099,70 @@ void FilterSubdivFittingPlugin::assembleIncrement(int rank)
 		dps += ls[i] * splpts(i, Eigen::placeholders::all);
 	}
 
-	auto R = splpts + dps;
-	Eigen::SparseMatrix<double> B = solver.solve(dATA);
-	Eigen::MatrixXd             rB[3];
-	for (int dim = 0; dim < 3; dim++) {
+	auto                        R     = projectedsplpts + dps;
+	auto                        K     = ATA + dATA;
+	Eigen::SparseMatrix<double> B     = solver.solve(dATA);
+	Eigen::MatrixXd             ri    = solver.solve(R);
+	Eigen::MatrixXd             rB[3] = {
+        Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), rank),
+        Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), rank),
+        Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), rank)};
 
+	Eigen::MatrixXd KB[3] = {
+		Eigen::MatrixXd::Zero(rank, rank),
+		Eigen::MatrixXd::Zero(rank, rank),
+		Eigen::MatrixXd::Zero(rank, rank)};
+
+	Eigen::MatrixXd RB[3] = {
+		Eigen::VectorXd::Zero(rank), Eigen::VectorXd::Zero(rank), Eigen::VectorXd::Zero(rank)};
+
+	for (int i = 0; i < rank; i++) {
+		rB[0](Eigen::placeholders::all, i) = ri(Eigen::placeholders::all, 0);
+		rB[1](Eigen::placeholders::all, i) = ri(Eigen::placeholders::all, 1);
+		rB[2](Eigen::placeholders::all, i) = ri(Eigen::placeholders::all, 2);
+		ri                                 = -B * ri;
 	}
+
+	KB[0] = rB[0].transpose() * K * rB[0];
+	KB[1] = rB[1].transpose() * K * rB[1];
+	KB[2] = rB[2].transpose() * K * rB[2];
+
+	RB[0] = rB[0].transpose() * R(Eigen::placeholders::all, 0);
+	RB[1] = rB[1].transpose() * R(Eigen::placeholders::all, 1);
+	RB[2] = rB[2].transpose() * R(Eigen::placeholders::all, 2);
+
+	CAcontrolmesh.resize(ptctrlmesh->cm.VN(), 3);
+	CAcontrolmesh(Eigen::placeholders::all, 0) = rB[0] * (KB[0].colPivHouseholderQr().solve(RB[0]));
+	CAcontrolmesh(Eigen::placeholders::all, 1) = rB[1] * (KB[1].colPivHouseholderQr().solve(RB[1]));
+	CAcontrolmesh(Eigen::placeholders::all, 2) = rB[2] * (KB[2].colPivHouseholderQr().solve(RB[2]));
 }
 
-Point3f
-FilterSubdivFittingPlugin::evaluateLimitPoint(int vi)
+Point3f FilterSubdivFittingPlugin::evaluateLimitPoint(int vi, bool direct)
 {
 	auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
 		ptsample->cm, "LimitStencil");
 
-	auto fitting_sample = ls[vi].transpose() * controlmesh;
+	auto& ctrlmesh = direct ? controlmesh : CAcontrolmesh;
+
+	auto fitting_sample = ls[vi].transpose() * ctrlmesh;
 
 	return Point3f(fitting_sample(0), fitting_sample(1), fitting_sample(2));
 }
 
-void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
+void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par, bool direct)
 {
+	if (!solveflag)
+		throw MLException("No solution!");
+
 	bool show_ctrlmesh  = par.getBool("show_new_mesh");
 	bool show_limitspls = par.getBool("show_limit_samples");
 	bool check_bary_coord = par.getBool("check_bary_coord");
 
+	auto& ctrlmesh = direct ? controlmesh : CAcontrolmesh;
+
 	if (show_ctrlmesh) {
 		MeshModel* sourceCtrlMesh = ptctrlmesh; // source = current
-		QString    newName        = sourceCtrlMesh->label() + "_fitting";
+		QString    newName        = sourceCtrlMesh->label() + "_control";
 		MeshModel* destModel    = mdptr->addNewMesh(
             "",
             newName,
@@ -1121,9 +1181,9 @@ void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
 		destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
 
 		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
-			destModel->cm.vert[vi].P()[0] = controlmesh(vi, 0);
-			destModel->cm.vert[vi].P()[1] = controlmesh(vi, 1);
-			destModel->cm.vert[vi].P()[2] = controlmesh(vi, 2);
+			destModel->cm.vert[vi].P()[0] = ctrlmesh(vi, 0);
+			destModel->cm.vert[vi].P()[1] = ctrlmesh(vi, 1);
+			destModel->cm.vert[vi].P()[2] = ctrlmesh(vi, 2);
 		}
 	}
 
@@ -1148,10 +1208,8 @@ void FilterSubdivFittingPlugin::displayResults(const RichParameterList& par)
 		destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
 
 		for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
-			destModel->cm.vert[vi].P() = evaluateLimitPoint(vi);
+			destModel->cm.vert[vi].P() = evaluateLimitPoint(vi, direct);
 		}
-
-		fittingres = destModel;
 	}
 
 	if (check_bary_coord) {

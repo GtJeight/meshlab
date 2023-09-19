@@ -97,8 +97,8 @@ private:
 	void                           updateVertexComplete(MeshModel* mm, std::string field);
 	void                           assembleFittingQuery(const RichParameterList& par);
 	void                           assembleIncrement(int rank);
-	vcg::Point3f                   evaluateLimitPoint(int vi);
-	void                           displayResults(const RichParameterList& par);
+	vcg::Point3f                   evaluateLimitPoint(int vi, bool direct);
+	void                           displayResults(const RichParameterList& par, bool direct);
 	Eigen::VectorXd                weightsPatch(const CFaceO* ft, float v, float w);
 	Eigen::VectorXd                weightsIrregularPatch(int V, float v, float w);
 	Eigen::RowVectorXd             weightsRegularPatch(float u, float v, float w);
@@ -122,11 +122,11 @@ private:
 	MeshModel*                                         ptsource    = nullptr;
 	MeshModel*                                         ptsample    = nullptr;
 	MeshModel*                                         ptctrlmesh  = nullptr;
-	MeshModel*                                         fittingres  = nullptr;
 	Eigen::MatrixXd                                    splpts;
 	Eigen::MatrixXd                                    projectedsplpts;
 	Eigen::MatrixXd                                    dps;
 	Eigen::MatrixXd                                    controlmesh;
+	Eigen::MatrixXd                                    CAcontrolmesh;
 	Eigen::SparseMatrix<double>                        AT;
 	Eigen::SparseMatrix<double>                        ATA;
 	Eigen::SparseMatrix<double>                        dATA;
