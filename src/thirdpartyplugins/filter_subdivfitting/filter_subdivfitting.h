@@ -96,7 +96,7 @@ private:
 	void                           updateLimitStencils(UpdateOptions mode);
 	void                           updateVertexComplete(MeshModel* mm, std::string field);
 	void                           assembleFittingQuery(const RichParameterList& par);
-	void                           assembleIncrement(int rank);
+	void                           assembleIncrement(const RichParameterList& par);
 	vcg::Point3f                   evaluateLimitPoint(int vi, bool direct);
 	void                           displayResults(const RichParameterList& par, bool direct);
 	Eigen::VectorXd                weightsPatch(const CFaceO* ft, float v, float w);
@@ -124,9 +124,11 @@ private:
 	MeshModel*                                         ptctrlmesh  = nullptr;
 	Eigen::MatrixXd                                    splpts;
 	Eigen::MatrixXd                                    projectedsplpts;
+	Eigen::MatrixXd                                    projectedsplpts2;
 	Eigen::MatrixXd                                    dps;
 	Eigen::MatrixXd                                    controlmesh;
 	Eigen::MatrixXd                                    CAcontrolmesh;
+	std::vector<Eigen::MatrixXd>                       results;
 	Eigen::SparseMatrix<double>                        AT;
 	Eigen::SparseMatrix<double>                        ATA;
 	Eigen::SparseMatrix<double>                        dATA;

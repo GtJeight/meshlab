@@ -314,6 +314,12 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 			"Check Barycenter",
 			" "
 			" "));
+		parlst.addParam(RichBool(
+			"compare",
+			false,
+			"Compare to Direct Solver",
+			" "
+			" "));
 	} break;
 	case FP_FITTING_ERROR: {
 		parlst.addParam(RichMesh("fitting_samples", md.mm()->id(), &md, "Fitting Samples", ""));
@@ -343,13 +349,18 @@ void FilterSubdivFittingPlugin::clearFittingCache()
 	if (!initflag)
 		return;
 
-	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "SampleUpdate");
-	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "BaryCoord");
-	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "FootTriangle");
-	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "LimitStencil");
-	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "Valence");
-	tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "ControlMeshUpdate");
-	tri::Allocator<CMeshO>::DeletePerFaceAttribute(ptctrlmesh->cm, "PatchSubdiv");
+	if (ptsample != nullptr) {
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "SampleUpdate");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "BaryCoord");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "FootTriangle");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "LimitStencil");
+	}
+
+	if (ptctrlmesh != nullptr) {
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "Valence");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "ControlMeshUpdate");
+		tri::Allocator<CMeshO>::DeletePerFaceAttribute(ptctrlmesh->cm, "PatchSubdiv");
+	}
 
 	initflag     = false;
 	topochange   = true;
@@ -361,6 +372,7 @@ void FilterSubdivFittingPlugin::clearFittingCache()
 	cacheV.clear();
 	cacheVinv.clear();
 	cacheAbarApow.clear();
+	results.clear();
 
 	mdptr           = nullptr;
 	ptsource        = nullptr;
@@ -406,6 +418,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		ptsample   = md.getMesh(par.getMeshId("samples"));
 		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
 		oldvn      = ptsample->cm.VN();
+		results.resize(2);
 
 		if (!initflag) {
 			assignPerElementAtributes();
@@ -445,8 +458,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	} break;
 
 	case FP_REANALYSIS_CA: {
-		int rank = par.getInt("CA_rank");
-		assembleIncrement(rank);
+		assembleIncrement(par);
 		displayResults(par, false);
 	} break;
 
@@ -1052,39 +1064,68 @@ void FilterSubdivFittingPlugin::updateLimitStencils(UpdateOptions mode) {
 
 void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& par)
 {
-	projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
-
 	CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls =
 		tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
 			ptsample->cm, "LimitStencil");
 
+	bool          no_fitting    = par.getBool("no_fitting");
+	bool          direct_solver = par.getBool("direct_solver");
 	QElapsedTimer tt;
-	tt.start();
-	AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
-	for (int si = 0; si != ptsample->cm.vert.size(); si++) {
-		AT.col(si) = ls[si];
-		projectedsplpts += ls[si] * splpts(si, Eigen::placeholders::all);
-	}
 
-	bool no_fitting = par.getBool("no_fitting");
+	if (direct_solver) {
+		Eigen::SparseMatrix<double> AT;
+		Eigen::SparseMatrix<double> ATA;
+		Eigen::MatrixXd             projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
+		tt.start();
+		AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
+		for (int si = 0; si != ptsample->cm.vert.size(); si++) {
+			AT.col(si) = ls[si];
+			projectedsplpts += ls[si] * splpts(si, Eigen::placeholders::all);
+		}
 
-	if (no_fitting) {
-		controlmesh.resize(ptctrlmesh->cm.vert.size(), 3);
-		for (int vi = 0; vi != ptctrlmesh->cm.vert.size(); vi++) {
-			controlmesh(vi, Eigen::placeholders::all) << ptctrlmesh->cm.vert[vi].P()[0],
-				ptctrlmesh->cm.vert[vi].P()[1], ptctrlmesh->cm.vert[vi].P()[2];
+		if (no_fitting) {
+			controlmesh.resize(ptctrlmesh->cm.vert.size(), 3);
+			for (int vi = 0; vi != ptctrlmesh->cm.vert.size(); vi++) {
+				controlmesh(vi, Eigen::placeholders::all) << ptctrlmesh->cm.vert[vi].P()[0],
+					ptctrlmesh->cm.vert[vi].P()[1], ptctrlmesh->cm.vert[vi].P()[2];
+			}
+		}
+		else {
+			ATA = AT * AT.transpose();
+			solver.compute(ATA);
+			controlmesh = solver.solve(projectedsplpts);
 		}
 	}
 	else {
-		ATA = AT * AT.transpose();
-		solver.compute(ATA);
-		controlmesh = solver.solve(projectedsplpts);
+		projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
+		tt.start();
+		AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
+		for (int si = 0; si != ptsample->cm.vert.size(); si++) {
+			AT.col(si) = ls[si];
+			projectedsplpts += ls[si] * splpts(si, Eigen::placeholders::all);
+		}
+
+		if (no_fitting) {
+			controlmesh.resize(ptctrlmesh->cm.vert.size(), 3);
+			for (int vi = 0; vi != ptctrlmesh->cm.vert.size(); vi++) {
+				controlmesh(vi, Eigen::placeholders::all) << ptctrlmesh->cm.vert[vi].P()[0],
+					ptctrlmesh->cm.vert[vi].P()[1], ptctrlmesh->cm.vert[vi].P()[2];
+			}
+		}
+		else {
+			ATA = AT * AT.transpose();
+			solver.compute(ATA);
+			controlmesh = solver.solve(projectedsplpts);
+		}
 	}
-	std::cout << "Direct Solve: " << tt.elapsed() << " msec" << std::endl;
+
+	std::cout << "DDDDDDDDDDDDDDDDDDDirect Solve: " << tt.elapsed() << " msec" << std::endl;
+	results[0] = controlmesh;
 }
 
-void FilterSubdivFittingPlugin::assembleIncrement(int rank)
+void FilterSubdivFittingPlugin::assembleIncrement(const RichParameterList& par)
 {
+	int  rank = par.getInt("CA_rank");
 	auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
 		ptsample->cm, "LimitStencil");
 
@@ -1140,7 +1181,16 @@ void FilterSubdivFittingPlugin::assembleIncrement(int rank)
 	CAcontrolmesh(Eigen::placeholders::all, 1) = rB[1] * (KB[1].colPivHouseholderQr().solve(RB[1]));
 	CAcontrolmesh(Eigen::placeholders::all, 2) = rB[2] * (KB[2].colPivHouseholderQr().solve(RB[2]));
 
-	std::cout << "Reanalysis: " << tt.elapsed() << " msec" << std::endl;
+	std::cout << "RRRRRRRRRRRRRRRRRRRRRRRRRRRReanalysis: " << tt.elapsed() << " msec" << std::endl;
+
+	results[1] = CAcontrolmesh;
+
+	bool compare = par.getBool("compare");
+	if (compare) {
+		auto diff = results[0] - results[1];
+		auto err  = diff.norm() / mdptr->mm()->cm.bbox.Diag();
+		std::cout << "EEEEEEEEEEEEEEEEEEEEEEEEError: " << err << std::endl;
+	}
 }
 
 Point3f FilterSubdivFittingPlugin::evaluateLimitPoint(int vi, bool direct)
