@@ -27,7 +27,7 @@
 // from meshlab common, include the abstract class file of filter plugins
 #include <common/plugins/interfaces/filter_plugin.h>
 #include <Eigen/Sparse>
-#include <Eigen/SparseCholesky>	
+#include <Eigen/SparseCholesky>
 
 /**
  * @brief The FilterSubdivFittingPlugin class

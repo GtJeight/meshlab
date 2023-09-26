@@ -8,8 +8,8 @@
 # The name of the plugin will be the name of the target, therefore you can
 # use that name if you need to link the plugin to some other libraries.
 
-set(SOURCES filter_subdivfitting.cpp)
+FILE(GLOB SOURCES *.cpp)
 
-set(HEADERS filter_subdivfitting.h)
+FILE(GLOB HEADERS *.h)
 
 add_meshlab_plugin(filter_subdivfitting ${SOURCES} ${HEADERS})
