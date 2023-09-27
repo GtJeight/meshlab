@@ -28,6 +28,7 @@
 #include <common/plugins/interfaces/filter_plugin.h>
 #include <Eigen/Sparse>
 #include <Eigen/SparseCholesky>
+#include <FittingDocument.h>
 
 /**
  * @brief The FilterSubdivFittingPlugin class
@@ -59,7 +60,8 @@ public:
 		FP_FITTING_CACHE_CLEAR,
 		FP_SIMPLE_SAMPLE_DENSIFY,
 		FP_QUALITY_TRANSFFER,
-		FP_ADD_SAMPLES
+		FP_ADD_SAMPLES,
+		FP_ASSEMBLE_QUERY
 	};
 	enum FootPointMode { MODE_MESH = 0, MODE_SUBDIVISION = 1 };
 	enum UpdateOptions { MODE_INIT = 0, MODE_UPDATE = 1 };
@@ -95,9 +97,11 @@ private:
 	void                           solvePickupVec();
 	void                           updateLimitStencils(UpdateOptions mode);
 	void                           updateVertexComplete(MeshModel* mm, std::string field);
+	void                           assembleLinearSystem(const RichParameterList& par);
 	void                           assembleFittingQuery(const RichParameterList& par);
 	void                           assembleIncrement(const RichParameterList& par);
 	vcg::Point3f                   evaluateLimitPoint(int vi, bool direct);
+	vcg::Point3f                   evaluateLimitPoint(int vi, Eigen::MatrixXd& ctrlmesh);
 	void                           displayResults(const RichParameterList& par, bool direct);
 	Eigen::VectorXd                weightsPatch(const CFaceO* ft, float v, float w);
 	Eigen::VectorXd                weightsIrregularPatch(int V, float v, float w);
@@ -112,6 +116,7 @@ private:
 	bool                                               topochange   = true;
 	bool                                               sampleupdate = true;
 	bool                                               solveflag    = false;
+	bool                                               hasreference = false;
 	int                                                oldvn        = 0;
 	std::map<int, Eigen::MatrixXd>                     cacheP;
 	std::map<int, Eigen::MatrixXd>                     cacheAbar;
@@ -122,6 +127,8 @@ private:
 	MeshModel*                                         ptsource    = nullptr;
 	MeshModel*                                         ptsample    = nullptr;
 	MeshModel*                                         ptctrlmesh  = nullptr;
+	std::shared_ptr<ReferenceSystem>                   reference;
+	std::shared_ptr<ReducedSystem>                     reduction;
 	Eigen::MatrixXd                                    splpts;
 	Eigen::MatrixXd                                    projectedsplpts;
 	Eigen::MatrixXd                                    projectedsplpts2;

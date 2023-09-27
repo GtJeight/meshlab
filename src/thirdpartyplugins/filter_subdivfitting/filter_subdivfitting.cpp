@@ -75,7 +75,8 @@ FilterSubdivFittingPlugin::FilterSubdivFittingPlugin()
 		FP_FITTING_CACHE_CLEAR,
 		FP_SIMPLE_SAMPLE_DENSIFY,
 		FP_QUALITY_TRANSFFER,
-		FP_ADD_SAMPLES
+		FP_ADD_SAMPLES,
+		FP_ASSEMBLE_QUERY
 	};
 
 	for(const ActionIDType& tt : typeList)
@@ -110,6 +111,7 @@ QString FilterSubdivFittingPlugin::filterName(ActionIDType filterId) const
 	case FP_QUALITY_TRANSFFER: return "Fitting: Transfer Samples Quality";
 	case FP_ADD_SAMPLES: return "Fitting: Add Samples";
 	case FP_REANALYSIS_CA: return "Fitting: Reanalysis";
+	case FP_ASSEMBLE_QUERY: return "Fitting: Assemble Query";
 	default :
 		assert(0);
 		return "";
@@ -135,6 +137,7 @@ QString FilterSubdivFittingPlugin::filterInfo(ActionIDType filterId) const
 	case FP_QUALITY_TRANSFFER:
 	case FP_ADD_SAMPLES:
 	case FP_REANALYSIS_CA:
+	case FP_ASSEMBLE_QUERY:
 		return "";
 	default :
 		assert(0);
@@ -160,6 +163,7 @@ FilterSubdivFittingPlugin::FilterClass FilterSubdivFittingPlugin::getClass(const
 	case FP_SIMPLE_SAMPLE_DENSIFY:
 	case FP_QUALITY_TRANSFFER:
 	case FP_ADD_SAMPLES:
+	case FP_ASSEMBLE_QUERY:
 		return FilterPlugin::SubdivFitting;
 	default :
 		assert(0);
@@ -185,6 +189,7 @@ int FilterSubdivFittingPlugin::getRequirements(const QAction* act)
 	switch (ID(act)) {
 	case FP_SUBDIV_FITTING:
 	case FP_REANALYSIS_CA:
+	case FP_ASSEMBLE_QUERY:
 		return MeshModel::MM_FACEFACETOPO | MeshModel::MM_VERTFACETOPO;
 	case FP_INIT:
 	case FP_FITTING_ERROR:
@@ -220,6 +225,7 @@ int FilterSubdivFittingPlugin::postCondition(const QAction* action) const
 	case FP_QUALITY_TRANSFFER:
 	case FP_ADD_SAMPLES:
 	case FP_REANALYSIS_CA:
+	case FP_ASSEMBLE_QUERY:
 	default: break;
 	}
 	return MeshModel::MM_VERTCOORD | MeshModel::MM_FACENORMAL | MeshModel::MM_VERTNORMAL;
@@ -321,6 +327,24 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 			" "
 			" "));
 	} break;
+	case FP_ASSEMBLE_QUERY: {
+		QStringList assembleOptions;
+		assembleOptions << "Direct Solver(Reference)"
+						<< "Reanalysis"
+						<< "Direct Solver(Temp)"
+						<< "None";
+		parlst.addParam(
+			RichEnum("assemble_options", hasreference ? 1 : 0, assembleOptions, "", ""));
+		parlst.addParam(RichBool("show_control", false, "Show Control Mesh", "", ""));
+		parlst.addParam(RichBool("show_samples", false, "Show Samples", "", ""));
+		parlst.addParam(RichInt(
+			"CA_rank",
+			4,
+			"Rank of CA",
+			" "
+			" "));
+
+	} break;
 	case FP_FITTING_ERROR: {
 		parlst.addParam(RichMesh("fitting_samples", md.mm()->id(), &md, "Fitting Samples", ""));
 		parlst.addParam(RichMesh("dest_mesh", md.mm()->id(), &md, "Destination Mesh", ""));
@@ -344,51 +368,6 @@ FilterSubdivFittingPlugin::initParameterList(const QAction* action, const MeshDo
 	return parlst;
 }
 
-void FilterSubdivFittingPlugin::clearFittingCache()
-{
-	if (!initflag)
-		return;
-
-	if (ptsample != nullptr) {
-		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "SampleUpdate");
-		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "BaryCoord");
-		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "FootTriangle");
-		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "LimitStencil");
-	}
-
-	if (ptctrlmesh != nullptr) {
-		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "Valence");
-		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "ControlMeshUpdate");
-		tri::Allocator<CMeshO>::DeletePerFaceAttribute(ptctrlmesh->cm, "PatchSubdiv");
-	}
-
-	initflag     = false;
-	topochange   = true;
-	sampleupdate = true;
-	solveflag    = false;
-
-	cacheP.clear();
-	cacheAbar.clear();
-	cacheV.clear();
-	cacheVinv.clear();
-	cacheAbarApow.clear();
-	results.clear();
-
-	mdptr           = nullptr;
-	ptsource        = nullptr;
-	ptsample        = nullptr;
-	ptctrlmesh      = nullptr;
-
-	splpts.setZero();
-	projectedsplpts.setZero();
-	dps.setZero();
-	controlmesh.setZero();
-	CAcontrolmesh.setZero();
-	AT.setZero();
-	ATA.setZero();
-	dATA.setZero();
-}
-
 /**
  * @brief The Real Core Function doing the actual mesh processing.
  * @param action
@@ -407,8 +386,6 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 	MeshModel* curMM = md.mm();
 	CMeshO&    m     = curMM->cm;
 
-	mdptr      = &md;
-
 	switch(ID(action)) {
 	case FP_INIT: {
 		if (initflag)
@@ -417,12 +394,174 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		ptsource   = md.getMesh(par.getMeshId("source_mesh"));
 		ptsample   = md.getMesh(par.getMeshId("samples"));
 		ptctrlmesh = md.getMesh(par.getMeshId("control_mesh"));
+		reference.reset(new ReferenceSystem);
+		reference->vn = ptsample->cm.VN();
+		reduction.reset(new ReducedSystem);
+		reduction->ref = reference.get();
+
 		oldvn      = ptsample->cm.VN();
 		results.resize(2);
 
 		if (!initflag) {
 			assignPerElementAtributes();
 			initflag = true;
+		}
+
+		updateControlVertexAttribute();
+		solvePickupVec();
+		updateVertexComplete(ptctrlmesh, "ControlMeshUpdate");
+		topochange = false;
+
+		parameterizeSamples(FootPointMode::MODE_MESH);
+		updateLimitStencils(UpdateOptions::MODE_INIT);
+		updateVertexComplete(ptsample, "SampleUpdate");
+		sampleupdate = false;
+
+		log("initialized");
+	} break;
+	case FP_ASSEMBLE_QUERY: {
+		int opt = par.getEnum("assemble_options");
+		bool show_control = par.getBool("show_control");
+		bool show_samples = par.getBool("show_samples");
+
+		std::shared_ptr<LinearSystem> fitting;
+
+		switch (opt) {
+		case 0: {
+			if (!initflag)
+				throw MLException("Not initiated!");
+			log("Assemble direct solver(Reference)");
+
+			auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+				ptsample->cm, "LimitStencil");
+
+			if (!reference->initialized) {
+				reference->ATS.setZero(ptctrlmesh->cm.VN(), 3);
+				reference->AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
+				for (int si = 0; si != ptsample->cm.vert.size(); si++) {
+					reference->AT.col(si) = ls[si];
+					reference->ATS += ls[si] * reference->S(si, Eigen::placeholders::all);
+				}
+				reference->ATA         = reference->AT * reference->AT.transpose();
+				reference->Solve();
+				reference->initialized = true;
+			}
+			fitting = reference;
+			hasreference = true;
+
+		} break;
+
+		case 1: {
+			if (!hasreference)
+				throw MLException("Not initiated!");
+			log("Assemble reanalysis");
+
+			if (!reduction->initialized) {
+				reduction->rank = par.getInt("CA_rank");
+				auto ls =
+					tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+						ptsample->cm, "LimitStencil");
+
+				reduction->S = reduction->ref->S;
+				reduction->S.conservativeResize(ptsample->cm.VN(), 3);
+				reduction->dATA.resize(ptctrlmesh->cm.VN(), ptctrlmesh->cm.VN());
+				reduction->dATA.setZero();
+				reduction->dATS.resize(ptctrlmesh->cm.VN(), 3);
+				reduction->dATS.setZero();
+
+				for (int i = reduction->ref->vn; i < ptsample->cm.VN(); i++) {
+					reduction->S(i, Eigen::placeholders::all) << ptsample->cm.vert[i].P()[0],
+						ptsample->cm.vert[i].P()[1], ptsample->cm.vert[i].P()[2];
+					reduction->dATA += ls[i] * ls[i].transpose();
+					reduction->dATS += ls[i] * reduction->S(i, Eigen::placeholders::all);
+				}
+				reduction->Solve();
+				reduction->initialized = true;
+			}
+			fitting = reduction;
+			std::cout << reduction->X;
+		} break;
+
+		case 2: {
+			if (!initflag)
+				throw MLException("Not initiated!");
+			log("Assemble direct solver(temp)");
+
+			auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+				ptsample->cm, "LimitStencil");
+
+			Eigen::SparseMatrix<double> AT;
+			Eigen::SparseMatrix<double> ATA;
+			Eigen::MatrixXd projectedsplpts = Eigen::MatrixXd::Zero(ptctrlmesh->cm.VN(), 3);
+			AT.resize(ptctrlmesh->cm.vert.size(), ptsample->cm.vert.size());
+			for (int si = 0; si != ptsample->cm.vert.size(); si++) {
+				AT.col(si) = ls[si];
+				projectedsplpts += ls[si] * splpts(si, Eigen::placeholders::all);
+			}
+
+			controlmesh.resize(ptctrlmesh->cm.vert.size(), 3);
+			for (int vi = 0; vi != ptctrlmesh->cm.vert.size(); vi++) {
+				controlmesh(vi, Eigen::placeholders::all) << ptctrlmesh->cm.vert[vi].P()[0],
+					ptctrlmesh->cm.vert[vi].P()[1], ptctrlmesh->cm.vert[vi].P()[2];
+			}
+		} break;
+
+		case 3: {
+			log("None");
+		}
+		default: break;
+		}
+
+		if (show_control) {
+			MeshModel* sourceCtrlMesh = ptctrlmesh; // source = current
+			QString    newName        = sourceCtrlMesh->label() + "_control";
+			MeshModel* destModel      = md.addNewMesh(
+                "",
+                newName,
+                true); // After Adding a mesh to a MeshDocument the new mesh is the current one
+			destModel->updateDataMask(sourceCtrlMesh);
+			tri::Append<CMeshO, CMeshO>::Mesh(destModel->cm, sourceCtrlMesh->cm);
+
+			for (const std::string& tex : destModel->cm.textures) {
+				destModel->addTexture(tex, sourceCtrlMesh->getTexture(tex));
+			}
+
+			log("Create control mesh solution %i", destModel->id());
+
+			// init new layer
+			destModel->updateBoxAndNormals();
+			destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
+
+			for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
+				destModel->cm.vert[vi].P()[0] = fitting->X(vi, 0);
+				destModel->cm.vert[vi].P()[1] = fitting->X(vi, 1);
+				destModel->cm.vert[vi].P()[2] = fitting->X(vi, 2);
+			}
+		}
+
+		if (show_samples) {
+			MeshModel* sourceCtrlMesh = ptsample; // source = current
+			QString    newName        = sourceCtrlMesh->label() + "_fitting";
+			MeshModel* destModel      = md.addNewMesh(
+                "",
+                newName,
+                true); // After Adding a mesh to a MeshDocument the new mesh is the current one
+			destModel->updateDataMask(sourceCtrlMesh);
+			tri::Append<CMeshO, CMeshO>::Mesh(destModel->cm, sourceCtrlMesh->cm);
+
+			for (const std::string& tex : destModel->cm.textures) {
+				destModel->addTexture(tex, sourceCtrlMesh->getTexture(tex));
+			}
+
+			log("Create fitting samples %i", destModel->id());
+
+			// init new layer
+			destModel->updateBoxAndNormals();
+			destModel->cm.Tr = sourceCtrlMesh->cm.Tr;
+
+			for (int vi = 0; vi < destModel->cm.vert.size(); vi++) {
+				destModel->cm.vert[vi].P() = evaluateLimitPoint(vi, fitting->X);
+			}
 		}
 
 	} break;
@@ -513,7 +652,7 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 
 		sampleupdate = true;
 		auto tobeadd = md.getMesh(par.getMeshId("add_samples"));
-		auto oldVN   = ptsample->cm.VN();
+		auto oldVN   = reference->vn;
 		auto vi      = tri::Allocator<CMeshO>::AddVertices(ptsample->cm, tobeadd->cm.VN());
 
 		for (int i = 0; i < tobeadd->cm.VN(); i++, vi++) {
@@ -550,6 +689,55 @@ std::map<std::string, QVariant> FilterSubdivFittingPlugin::applyFilter(
 		wrongActionCalled(action);
 	}
 	return std::map<std::string, QVariant>();
+}
+
+
+void FilterSubdivFittingPlugin::clearFittingCache()
+{
+	if (!initflag)
+		return;
+
+	if (ptsample != nullptr) {
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "SampleUpdate");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "BaryCoord");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "FootTriangle");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptsample->cm, "LimitStencil");
+	}
+
+	if (ptctrlmesh != nullptr) {
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "Valence");
+		tri::Allocator<CMeshO>::DeletePerVertexAttribute(ptctrlmesh->cm, "ControlMeshUpdate");
+		tri::Allocator<CMeshO>::DeletePerFaceAttribute(ptctrlmesh->cm, "PatchSubdiv");
+	}
+
+	initflag     = false;
+	topochange   = true;
+	sampleupdate = true;
+	solveflag    = false;
+
+	cacheP.clear();
+	cacheAbar.clear();
+	cacheV.clear();
+	cacheVinv.clear();
+	cacheAbarApow.clear();
+	results.clear();
+
+	reference.reset();
+	reduction.reset();
+
+	mdptr      = nullptr;
+	ptsource   = nullptr;
+	ptsample   = nullptr;
+	ptctrlmesh = nullptr;
+
+	splpts.setZero();
+	projectedsplpts.setZero();
+	dps.setZero();
+	controlmesh.setZero();
+	CAcontrolmesh.setZero();
+	AT.setZero();
+	ATA.setZero();
+	dATA.setZero();
 }
 
 void FilterSubdivFittingPlugin::assignPerElementAtributes()
@@ -751,10 +939,10 @@ void FilterSubdivFittingPlugin::updateControlVertexAttribute()
 		}
 	}
 
-	splpts = Eigen::MatrixXd::Zero(ptsample->cm.VN(), 3);
+	reference->S.resize(ptsample->cm.VN(), 3);
 
 	for (int si = 0; si != ptsample->cm.vert.size(); si++) {
-		splpts(si, Eigen::placeholders::all) << ptsample->cm.vert[si].P()[0],
+		reference->S(si, Eigen::placeholders::all) << ptsample->cm.vert[si].P()[0],
 			ptsample->cm.vert[si].P()[1], ptsample->cm.vert[si].P()[2];
 	}
 }
@@ -1062,6 +1250,11 @@ void FilterSubdivFittingPlugin::updateLimitStencils(UpdateOptions mode) {
 	}
 }
 
+void assembleLinearSystem(const RichParameterList& par)
+{
+	bool a;
+}
+
 void FilterSubdivFittingPlugin::assembleFittingQuery(const RichParameterList& par)
 {
 	CMeshO::PerVertexAttributeHandle<Eigen::SparseVector<double>> ls =
@@ -1199,6 +1392,16 @@ Point3f FilterSubdivFittingPlugin::evaluateLimitPoint(int vi, bool direct)
 		ptsample->cm, "LimitStencil");
 
 	auto& ctrlmesh = direct ? controlmesh : CAcontrolmesh;
+
+	auto fitting_sample = ls[vi].transpose() * ctrlmesh;
+
+	return Point3f(fitting_sample(0), fitting_sample(1), fitting_sample(2));
+}
+
+Point3f FilterSubdivFittingPlugin::evaluateLimitPoint(int vi, Eigen::MatrixXd& ctrlmesh)
+{
+	auto ls = tri::Allocator<CMeshO>::FindPerVertexAttribute<Eigen::SparseVector<double>>(
+		ptsample->cm, "LimitStencil");
 
 	auto fitting_sample = ls[vi].transpose() * ctrlmesh;
 
